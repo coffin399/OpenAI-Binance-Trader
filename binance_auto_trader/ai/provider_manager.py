@@ -291,6 +291,20 @@ class AIProviderManager:
             raw_keys = list(entry.get("api_keys", []))
             filtered_keys = [key for key in raw_keys if isinstance(key, str) and key.strip()]
 
+            headers_entry = entry.get("headers")
+            if headers_entry is None:
+                headers_dict: Dict[str, str] = {}
+            else:
+                try:
+                    headers_dict = dict(headers_entry)
+                except TypeError as exc:  # noqa: BLE001
+                    logger.warning(
+                        "Invalid headers for provider %s. Falling back to empty dict (%s).",
+                        entry.get("name"),
+                        exc,
+                    )
+                    headers_dict = {}
+
             config = ProviderConfig(
                 name=entry.get("name"),
                 base_url=entry.get("base_url"),
@@ -299,7 +313,7 @@ class AIProviderManager:
                 api_keys=filtered_keys,
                 system_prompt=entry.get("system_prompt"),
                 max_attempts=max_attempts,
-                headers=dict(entry.get("headers" or {})),
+                headers=headers_dict,
             )
         except Exception as exc:  # noqa: BLE001
             logger.error("Invalid AI provider configuration: %s", exc)

@@ -410,7 +410,7 @@ def _build_app(trade_tracker: TradeTracker, refresh_interval: int) -> FastAPI:
         allow_headers=["*"],
     )
 
-    dashboard_html = DASHBOARD_TEMPLATE.format(refresh_interval=refresh_interval)
+    dashboard_html = DASHBOARD_TEMPLATE.replace("{refresh_interval}", str(refresh_interval))
 
     @app.get("/", response_class=HTMLResponse)
     async def index() -> str:  # noqa: D401 - FastAPI endpoint

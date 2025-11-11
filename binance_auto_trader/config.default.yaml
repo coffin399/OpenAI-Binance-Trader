@@ -5,7 +5,7 @@ binance:
   recv_window_ms: 5000
 
 discord:
-  enabled: true
+  enabled: false
   bot_token: ""
   channel_ids: []
   rate_limit:
@@ -20,88 +20,62 @@ trading:
   symbols:
     - BTC/JPY
     - ETH/JPY
-    - XRP/JPY
-    - SOL/JPY
-    - BNB/JPY
     - DOGE/JPY
-  timeframe: 4h
+  timeframe: 1m
   quantity: 0.0
-  max_open_trades: "0Trades"
+  max_open_trades: "6Trades"
   max_investment_per_trade: "0JPY"
   max_total_investment: "0JPY"
   # 0Trades で無制限
   # 0JPY で無制限
+
 strategies:
   active:
     - ai_hybrid
-    - rsi_mean_reversion
   moving_average_cross:
     fast_ma: 9
     slow_ma: 21
   ai_hybrid:
-    provider: openai
+    provider: openrouter
     prompt_template: |
-      You are an algorithmic trading assistant making discretionary decisions for {symbol} on the {timeframe} timeframe.
-      Latest candle: {latest_candle}
-      Previous close price: {previous_close:.4f}
-      Recent change over last 5 candles: {recent_change_pct:.2f}%
-      Fast SMA(5): {fast_sma:.4f}
-      Slow SMA(20): {slow_sma:.4f}
-      Average volume (last 5 candles): {volume_avg:.2f}
-      Volume trend vs avg: {volume_trend:.2f}x
-      Momentum (fast_slow_diff): {momentum:.4f}
-      Range high / low (last 24 candles): {range_high:.4f} / {range_low:.4f}
-      Volatility over range: {volatility_pct:.2f}%
-      RSI(14): {rsi:.2f}
-      Recent close % changes (last 3 intervals): {recent_close_changes}
-      Reply with ONLY one of the following actions based on the next interval outlook: BUY, SELL, or HOLD.
-
-  rsi_mean_reversion:
-    period: 14
-    overbought: 70
-    oversold: 30
-    minimum_history: 50
+      AGGRESSIVE MOMENTUM TRADER: {symbol} ({timeframe})
+      
+      DATA: Price {previous_close:.4f} | Δ{recent_change_pct:.2f}% | RSI {rsi:.2f} | Vol {volume_trend:.2f}x | Mom {momentum:.4f}
+      
+      RULES:
+      BUY = RSI<65 + momentum>0 + (volume>1.2x OR recent_change>1%)
+      SELL = RSI>70 OR momentum<-0.001 OR volume<0.8x
+      HOLD = Neutral/ranging
+      
+      Target: +4% gains | Max loss: -2%
+      Bias: FAVOR action over inaction when signals align
+      
+      Reply ONLY: BUY, SELL, or HOLD
 
 ai:
   providers:
-    - name: openai
-      base_url: https://api.openai.com/v1
-      model: gpt-4o-mini
-      temperature: 0.2
+    - name: openrouter
+      base_url: https://openrouter.ai/api/v1
+      model: deepseek/deepseek-chat-v3.1:free
+      temperature: 0.6
       api_keys:
-        - "sk-YOUR_OPENAI_KEY_1"
-        - "sk-YOUR_OPENAI_KEY_2"
-    - name: anthropic
-      base_url: https://api.anthropic.com/v1
-      model: claude-3-5-sonnet
-      temperature: 0.2
-      api_keys:
-        - "anthropic-key-1"
-    - name: gemini
-      base_url: https://generativelanguage.googleapis.com/v1beta/openai
-      model: gemini-1.5-flash
-      temperature: 0.2
-      api_keys:
-        - "GEMINI_API_KEY_1"
+        - ""
 
 backtesting:
-  enabled: true
+  enabled: false
   lookback_intervals: 200
   symbols:
     - BTC/JPY
     - ETH/JPY
-    - XRP/JPY
-    - SOL/JPY
-    - BNB/JPY
     - DOGE/JPY
-  timeframe: 4h
+  timeframe: 1m
 
 risk_management:
-  stop_loss_percent: 1.0
-  take_profit_percent: 2.0
+  stop_loss_percent: 2.0
+  take_profit_percent: 4.0
 
 logging:
-  level: INFO
+  level: DEBUG
   file: trading_bot.log
   console: true
 
@@ -109,8 +83,8 @@ web:
   enabled: true
   host: 127.0.0.1
   port: 8000
-  refresh_interval_seconds: 5
+  refresh_interval_seconds: 1
 
 runtime:
   dry_run: true
-  polling_interval_seconds: 900
+  polling_interval_seconds: 264

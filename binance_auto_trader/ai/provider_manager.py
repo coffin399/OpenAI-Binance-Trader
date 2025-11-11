@@ -4,7 +4,7 @@ import logging
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 import requests
 
@@ -20,6 +20,12 @@ try:  # Optional dependency for Gemini SDK
 except ImportError:  # pragma: no cover - optional
     google_genai = None
     GENAI_TYPES = None
+
+
+try:
+    from openai import OpenAI
+except ImportError:  # pragma: no cover - ensure graceful message if dependency missing
+    OpenAI = None  # type: ignore[assignment]
 
 
 @dataclass
@@ -84,42 +90,49 @@ class AIProvider:
         if self.config.name.lower() == "gemini" or "generativelanguage.googleapis.com" in self.config.base_url:
             return self._call_gemini(prompt, api_key)
 
+        return self._call_openai(prompt, api_key)
+
+    def _call_openai(self, prompt: str, api_key: str) -> str:
+        if OpenAI is None:
+            raise ProviderError("openai Python client is not installed. Please install openai>=1.0.0.")
+
         system_prompt = self.config.system_prompt or "You are a trading strategy assistant. Reply with BUY, SELL, or HOLD."  # noqa: E501
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        }
-        payload = {
-            "model": self.config.model,
-            "temperature": self.config.temperature,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": prompt},
-            ],
-        }
+        base_url = self.config.base_url.rstrip("/") if self.config.base_url else None
+        client_kwargs: Dict[str, Any] = {"api_key": api_key}
+        if base_url:
+            client_kwargs["base_url"] = base_url
 
-        response = self._session.post(
-            f"{self.config.base_url.rstrip('/')}/chat/completions",
-            json=payload,
-            headers=headers,
-            timeout=30,
+        client = OpenAI(**client_kwargs)  # type: ignore[arg-type]
+
+        messages: List[Dict[str, str]] = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+
+        response = client.chat.completions.create(
+            model=self.config.model,
+            temperature=self.config.temperature,
+            messages=messages,
         )
-        if response.status_code == 401:
-            raise ProviderError("Unauthorized - likely invalid API key")
-        if response.status_code >= 400:
-            raise ProviderError(
-                f"Provider {self.config.name} error {response.status_code}: {response.text}"
-            )
 
-        data = response.json()
-        choices = data.get("choices") or []
+        choices = getattr(response, "choices", None) or []
         if not choices:
             raise ProviderError("Provider returned no choices")
-        message = choices[0].get("message", {})
-        content = message.get("content", "").strip()
-        if not content:
+
+        message = getattr(choices[0], "message", None)
+        if not message:
+            raise ProviderError("Provider returned empty message")
+
+        content = getattr(message, "content", None)
+        if isinstance(content, list):
+            content = "".join(
+                part if isinstance(part, str) else getattr(part, "text", str(part))
+                for part in content
+            )
+        if not isinstance(content, str) or not content.strip():
             raise ProviderError("Provider returned empty content")
-        return content
+
+        return content.strip()
 
     def _call_gemini(self, prompt: str, api_key: str) -> str:
         if google_genai is not None:

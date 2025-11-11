@@ -131,16 +131,25 @@ class AIProvider:
 
         client = google_genai.Client(api_key=api_key)
 
-        contents: List[Dict[str, Any]] = [
+        contents: List[Dict[str, Any]] = []
+        if self.config.system_prompt:
+            contents.append(
+                {
+                    "role": "system",
+                    "parts": [
+                        {"text": self.config.system_prompt},
+                    ],
+                }
+            )
+        contents.append(
             {
                 "role": "user",
                 "parts": [
                     {"text": prompt},
                 ],
             }
-        ]
+        )
 
-        system_instruction: Optional[str] = self.config.system_prompt
         generation_config: Dict[str, Any] = {
             "temperature": self.config.temperature,
         }
@@ -148,7 +157,6 @@ class AIProvider:
         response = client.models.generate_content(
             model=self.config.model,
             contents=contents,
-            system_instruction=system_instruction,
             safety_settings=[],
             generation_config=generation_config,
         )

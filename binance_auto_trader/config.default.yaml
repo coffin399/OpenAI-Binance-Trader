@@ -12,6 +12,9 @@ discord:
     max_messages: 15
     per_seconds: 5
   ansi_wrap: true
+  commands_enabled: true
+  command_guild_ids: []
+  allowed_user_ids: []
 
 trading:
   symbols:
@@ -31,6 +34,7 @@ trading:
 strategies:
   active:
     - ai_hybrid
+    - rsi_mean_reversion
   moving_average_cross:
     fast_ma: 9
     slow_ma: 21
@@ -44,6 +48,12 @@ strategies:
       Fast SMA(5): {fast_sma:.4f}
       Slow SMA(20): {slow_sma:.4f}
       Average volume (last 5 candles): {volume_avg:.2f}
+
+  rsi_mean_reversion:
+    period: 14
+    overbought: 70
+    oversold: 30
+    minimum_history: 50
 
       Recent candlesticks (oldest -> newest):
       {recent_candles}

@@ -20,11 +20,21 @@ class TradeControl(commands.Cog):
         self.bot = bot
         self.trading_bot = trading_bot
 
+    async def _check_permission(self, interaction: discord.Interaction) -> bool:
+        if not hasattr(self.bot, "allowed_user_ids"):
+            return True
+        if interaction.user.id in self.bot.allowed_user_ids:
+            return True
+        await interaction.response.send_message("このコマンドは許可されたユーザーのみが実行できます。", ephemeral=True)
+        return False
+
     @app_commands.command(
         name="stop-trade",
         description="全ポジションを決済し、トレードを一時停止します。",
     )
     async def stop_trade(self, interaction: discord.Interaction) -> None:
+        if not await self._check_permission(interaction):
+            return
         await interaction.response.defer(ephemeral=True)
         await asyncio.to_thread(self.trading_bot.pause_trading)
         await asyncio.to_thread(self.trading_bot.close_all_positions)
@@ -35,15 +45,18 @@ class TradeControl(commands.Cog):
 
     @app_commands.command(name="start-trade", description="トレードを再開します。")
     async def start_trade(self, interaction: discord.Interaction) -> None:
+        if not await self._check_permission(interaction):
+            return
         await interaction.response.defer(ephemeral=True)
         await asyncio.to_thread(self.trading_bot.resume_trading)
         await interaction.followup.send("トレードを再開しました。", ephemeral=True)
 
 
 class DiscordCommandBot(commands.Bot):
-    def __init__(self, trading_bot: TradingBot, intents: discord.Intents) -> None:
+    def __init__(self, trading_bot: TradingBot, intents: discord.Intents, *, allowed_user_ids: set[int]) -> None:
         super().__init__(command_prefix="!", intents=intents)
         self.trading_bot = trading_bot
+        self.allowed_user_ids = allowed_user_ids
 
     async def setup_hook(self) -> None:
         await self.add_cog(TradeControl(self, self.trading_bot))
@@ -102,10 +115,12 @@ def start_discord_bot(config: Config, trading_bot: TradingBot) -> Optional[Disco
     guild_values = getattr(discord_config, "command_guild_ids", [])
     guilds = _parse_command_guilds(guild_values)
 
+    allowed_user_ids = set(getattr(discord_config, "allowed_user_ids", []))
+
     intents = discord.Intents.none()
     intents.guilds = True
 
-    bot = DiscordCommandBot(trading_bot, intents=intents)
+    bot = DiscordCommandBot(trading_bot, intents=intents, allowed_user_ids=allowed_user_ids)
 
     async def sync_commands() -> None:
         if guilds:

@@ -58,6 +58,10 @@ class TradingBot:
             getattr(config.trading, "max_investment_per_trade", "0JPY"),
             "JPY",
         )
+        self.max_total_investment = parse_currency_limit(
+            getattr(config.trading, "max_total_investment", "0JPY"),
+            "JPY",
+        )
         self.polling_interval = int(
             getattr(config.runtime, "polling_interval_seconds", 60)
         )
@@ -205,6 +209,19 @@ class TradingBot:
                 price,
             )
             return
+
+        if self.max_total_investment > 0:
+            current_total = self.trade_tracker.get_total_open_value()
+            existing_value = self.trade_tracker.get_open_trade_value(display_symbol)
+            projected_total = current_total - existing_value + (abs(quantity) * price)
+            if projected_total > self.max_total_investment:
+                logger.warning(
+                    "Total capital limit reached (%.2f > %.2f). Skipping new position for %s.",
+                    projected_total,
+                    self.max_total_investment,
+                    display_symbol,
+                )
+                return
 
         order = self._submit_order(exchange_symbol, side, quantity)
         if order:

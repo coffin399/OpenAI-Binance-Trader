@@ -28,9 +28,9 @@ trading:
   quantity: 0.0
   max_open_trades: "0Trades"
   max_investment_per_trade: "0JPY"
+  max_total_investment: "0JPY"
   # 0Trades で無制限
   # 0JPY で無制限
-
 strategies:
   active:
     - ai_hybrid

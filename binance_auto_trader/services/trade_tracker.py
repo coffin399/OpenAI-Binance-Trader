@@ -117,6 +117,24 @@ class TradeTracker:
         with self._lock:
             return symbol in self.open_trades
 
+    def get_total_open_value(self) -> float:
+        with self._lock:
+            total = 0.0
+            for trade in self.open_trades.values():
+                quantity = float(trade.quantity) if trade.quantity is not None else 0.0
+                entry_price = float(trade.entry_price) if trade.entry_price is not None else 0.0
+                total += abs(quantity) * entry_price
+            return total
+
+    def get_open_trade_value(self, symbol: str) -> float:
+        with self._lock:
+            trade = self.open_trades.get(symbol)
+            if not trade:
+                return 0.0
+            quantity = float(trade.quantity) if trade.quantity is not None else 0.0
+            entry_price = float(trade.entry_price) if trade.entry_price is not None else 0.0
+            return abs(quantity) * entry_price
+
     # ------------------------------------------------------------------
     # Palette helpers
     # ------------------------------------------------------------------

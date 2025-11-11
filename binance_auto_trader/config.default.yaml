@@ -73,8 +73,8 @@ ai:
         - "GEMINI_API_KEY_1"
 
 backtesting:
-  enabled: true
-  lookback_intervals: 200
+  enabled: false
+  lookback_intervals: 900
   symbols:
     - BTC/JPY
     - ETH/JPY

@@ -258,15 +258,15 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
       const REFRESH_INTERVAL = {refresh_interval} * 1000;
       let priceChart;
 
-      function formatNumber(value, options = {{ suffix: '', precision: 2 }}) {{
+      function formatNumber(value, options = { suffix: '', precision: 2 }) {
         if (value === null || value === undefined) return '—';
         const suffix = options.suffix || '';
         const precision = options.precision ?? 2;
-        if (typeof value === 'string') return `${{value}}${{suffix}}`;
-        return `${{Number(value).toFixed(precision)}}${{suffix}}`;
-      }}
+        if (typeof value === 'string') return `${value}${suffix}`;
+        return `${Number(value).toFixed(precision)}${suffix}`;
+      }
 
-      function renderPriceChart(series) {{
+      function renderPriceChart(series) {
         const ctx = document.getElementById('price-chart');
         const labels = series.length ? series[0].timestamps : [];
         const datasets = series.map((entry) => ({
@@ -278,90 +278,90 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
           fill: false,
         }));
 
-        if (priceChart) {{
+        if (priceChart) {
           priceChart.data.labels = labels;
           priceChart.data.datasets = datasets;
           priceChart.update();
-        }} else {{
-          priceChart = new Chart(ctx, {{
+        } else {
+          priceChart = new Chart(ctx, {
             type: 'line',
-            data: {{ labels, datasets }},
-            options: {{
-              plugins: {{
-                legend: {{ labels: {{ color: '#cbd5f5' }} }},
-              }},
-              scales: {{
-                x: {{ ticks: {{ color: '#94a3b8' }} }},
-                y: {{ ticks: {{ color: '#94a3b8' }} }},
-              }},
-            }},
-          }});
-        }}
-      }}
+            data: { labels, datasets },
+            options: {
+              plugins: {
+                legend: { labels: { color: '#cbd5f5' } },
+              },
+              scales: {
+                x: { ticks: { color: '#94a3b8' } },
+                y: { ticks: { color: '#94a3b8' } },
+              },
+            },
+          });
+        }
+      }
 
-      function renderTradeLists(data) {{
+      function renderTradeLists(data) {
         const openEl = document.getElementById('open-trades');
         const recentEl = document.getElementById('recent-trades');
         openEl.innerHTML = '';
         recentEl.innerHTML = '';
 
-        data.open_trades.forEach((trade) => {{
+        data.open_trades.forEach((trade) => {
           const el = document.createElement('div');
           el.className = 'list-item';
           el.innerHTML = `
             <div>
-              <div class="pill"><span class="dot" style="background:${{trade.color}}"></span>${{trade.symbol}}</div>
-              <div style="color:#94a3b8; font-size:0.85rem; margin-top:6px;">${{trade.strategy}} • ${{trade.entry_price.toFixed(4)}}</div>
+              <div class="pill"><span class="dot" style="background:${trade.color}"></span>${trade.symbol}</div>
+              <div style="color:#94a3b8; font-size:0.85rem; margin-top:6px;">${trade.strategy} • ${trade.entry_price.toFixed(4)}</div>
             </div>
             <div style="text-align:right;">
-              <div>${{trade.action}}</div>
-              <div style="color:#94a3b8; font-size:0.8rem;">Since ${{trade.opened_at ? new Date(trade.opened_at).toLocaleString() : '—'}}</div>
+              <div>${trade.action}</div>
+              <div style="color:#94a3b8; font-size:0.8rem;">Since ${trade.opened_at ? new Date(trade.opened_at).toLocaleString() : '—'}</div>
             </div>`;
           openEl.appendChild(el);
-        }});
+        });
 
-        data.recent_closed_trades.forEach((trade) => {{
+        data.recent_closed_trades.forEach((trade) => {
           const el = document.createElement('div');
           el.className = 'list-item';
           const pnlClass = trade.pnl_percent >= 0 ? '#10b981' : '#ef4444';
           el.innerHTML = `
             <div>
-              <div class="pill"><span class="dot" style="background:${{trade.color}}"></span>${{trade.symbol}}</div>
-              <div style="color:#94a3b8; font-size:0.85rem; margin-top:6px;">${{trade.strategy}}</div>
+              <div class="pill"><span class="dot" style="background:${trade.color}"></span>${trade.symbol}</div>
+              <div style="color:#94a3b8; font-size:0.85rem; margin-top:6px;">${trade.strategy}</div>
             </div>
             <div style="text-align:right;">
-              <div style="color:${{pnlClass}}">${{trade.pnl_percent.toFixed(2)}}%</div>
-              <div style="color:#94a3b8; font-size:0.8rem;">Closed ${{trade.closed_at ? new Date(trade.closed_at).toLocaleString() : '—'}}</div>
+              <div style="color:${pnlClass}">${trade.pnl_percent.toFixed(2)}%</div>
+              <div style="color:#94a3b8; font-size:0.8rem;">Closed ${trade.closed_at ? new Date(trade.closed_at).toLocaleString() : '—'}</div>
             </div>`;
           recentEl.appendChild(el);
-        }});
-      }}
+        });
+      }
 
-      function renderBacktests(payload) {{
+      function renderBacktests(payload) {
         const summary = payload.summary;
         document.getElementById('bt-trades').textContent = summary.trade_count;
         document.getElementById('bt-strategies').textContent = summary.strategy_count;
-        document.getElementById('bt-average').textContent = formatNumber(summary.average_profit, {{ suffix: '%'}});
-        document.getElementById('bt-max').textContent = formatNumber(summary.max_profit, {{ suffix: '%'}});
-        document.getElementById('bt-sortino').textContent = formatNumber(summary.sortino_ratio, {{ precision: 2 }});
+        document.getElementById('bt-average').textContent = formatNumber(summary.average_profit, { suffix: '%' });
+        document.getElementById('bt-max').textContent = formatNumber(summary.max_profit, { suffix: '%' });
+        document.getElementById('bt-sortino').textContent = formatNumber(summary.sortino_ratio, { precision: 2 });
 
         const tbody = document.querySelector('#bt-table tbody');
         tbody.innerHTML = '';
-        payload.results.forEach((row) => {{
+        payload.results.forEach((row) => {
           const tr = document.createElement('tr');
           tr.innerHTML = `
-            <td>${{row.strategy}}</td>
-            <td>${{row.symbol}}</td>
-            <td>${{row.trade_count}}</td>
-            <td>${{formatNumber(row.average_return, {{ suffix: '%'}})}}</td>
-            <td>${{formatNumber(row.max_return, {{ suffix: '%'}})}}</td>
-            <td>${{formatNumber(row.sortino_ratio, {{ precision: 2 }})}}</td>
-            <td>${{row.generated_at ? new Date(row.generated_at).toLocaleString() : '—'}}</td>`;
+            <td>${row.strategy}</td>
+            <td>${row.symbol}</td>
+            <td>${row.trade_count}</td>
+            <td>${formatNumber(row.average_return, { suffix: '%' })}</td>
+            <td>${formatNumber(row.max_return, { suffix: '%' })}</td>
+            <td>${formatNumber(row.sortino_ratio, { precision: 2 })}</td>
+            <td>${row.generated_at ? new Date(row.generated_at).toLocaleString() : '—'}</td>`;
           tbody.appendChild(tr);
-        }});
-      }}
+        });
+      }
 
-      async function refreshDashboard() {{
+      async function refreshDashboard() {
         try {{
           const [summaryRes, priceRes, btRes] = await Promise.all([
             fetch('/api/summary'),
@@ -379,9 +379,9 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
 
           document.getElementById('metric-trades').textContent = summary.trade_count;
           document.getElementById('metric-strategies').textContent = summary.strategy_count;
-          document.getElementById('metric-average').textContent = formatNumber(summary.average_profit, {{ suffix: '%'}});
-          document.getElementById('metric-max').textContent = formatNumber(summary.max_profit, {{ suffix: '%'}});
-          document.getElementById('metric-sortino').textContent = formatNumber(summary.sortino_ratio, {{ precision: 2 }});
+          document.getElementById('metric-average').textContent = formatNumber(summary.average_profit, { suffix: '%' });
+          document.getElementById('metric-max').textContent = formatNumber(summary.max_profit, { suffix: '%' });
+          document.getElementById('metric-sortino').textContent = formatNumber(summary.sortino_ratio, { precision: 2 });
           document.getElementById('metric-updated-at').textContent = `Updated ${new Date().toLocaleTimeString()}`;
 
           renderPriceChart(prices.series || []);
@@ -390,7 +390,7 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
         }} catch (error) {{
           console.error('Dashboard refresh failed', error);
         }}
-      }}
+      }
 
       refreshDashboard();
       setInterval(refreshDashboard, REFRESH_INTERVAL);

@@ -459,7 +459,11 @@ def start_dashboard(trade_tracker: TradeTracker, config) -> None:
 
     _dashboard_thread = threading.Thread(target=_run_server, daemon=True)
     _dashboard_thread.start()
-    try:
-        webbrowser.open_new_tab(f"http://{host}:{port}")
-    except Exception as err:  # noqa: BLE001
-        logger.warning("Failed to open browser automatically: %s", err)
+
+    def _open_browser() -> None:
+        try:
+            webbrowser.open_new_tab(f"http://{host}:{port}")
+        except Exception as err:  # noqa: BLE001
+            logger.warning("Failed to open browser automatically: %s", err)
+
+    threading.Timer(1.5, _open_browser).start()

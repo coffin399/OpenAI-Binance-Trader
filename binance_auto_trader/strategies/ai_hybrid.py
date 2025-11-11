@@ -25,9 +25,14 @@ class AIHybridStrategy(Strategy):
             raise ValueError("AIHybridStrategy requires 'provider' setting")
         if not self.ai_manager or not self.ai_manager.has_provider(self.provider_name):
             raise ValueError(f"AI provider '{self.provider_name}' not available")
+        self._last_timestamp: Dict[str, pd.Timestamp] = {}
 
     def evaluate(self, df: pd.DataFrame, symbol: str) -> Optional[StrategyDecision]:
         prompt_context = self._build_prompt_context(df, symbol)
+        latest_timestamp: pd.Timestamp = df.iloc[-1]["timestamp"]
+        if symbol in self._last_timestamp and self._last_timestamp[symbol] == latest_timestamp:
+            return None
+        self._last_timestamp[symbol] = latest_timestamp
         try:
             prompt = self.prompt_template.format(**prompt_context)
         except KeyError as exc:  # noqa: BLE001

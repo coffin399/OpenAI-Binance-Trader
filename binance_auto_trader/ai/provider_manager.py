@@ -18,6 +18,8 @@ class ProviderConfig:
     model: str
     temperature: float = 0.0
     api_keys: List[str] = field(default_factory=list)
+    system_prompt: Optional[str] = None
+    max_attempts: Optional[int] = None
 
 
 class ProviderError(Exception):
@@ -45,7 +47,8 @@ class AIProvider:
 
     def generate(self, prompt: str, max_attempts: Optional[int] = None) -> str:
         attempts = 0
-        max_attempts = max_attempts or len(self.config.api_keys)
+        configured_attempts = self.config.max_attempts or len(self.config.api_keys)
+        max_attempts = max_attempts or configured_attempts
 
         while attempts < max_attempts:
             api_key = self._next_key()
@@ -70,6 +73,7 @@ class AIProvider:
         if self.config.name.lower() == "gemini" or "generativelanguage.googleapis.com" in self.config.base_url:
             return self._call_gemini(prompt, api_key)
 
+        system_prompt = self.config.system_prompt or "You are a trading strategy assistant. Reply with BUY, SELL, or HOLD."  # noqa: E501
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
@@ -78,7 +82,7 @@ class AIProvider:
             "model": self.config.model,
             "temperature": self.config.temperature,
             "messages": [
-                {"role": "system", "content": "You are a trading strategy assistant."},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt},
             ],
         }
@@ -107,6 +111,7 @@ class AIProvider:
         return content
 
     def _call_gemini(self, prompt: str, api_key: str) -> str:
+        system_prompt = self.config.system_prompt or "You are a trading strategy assistant. Reply with BUY, SELL, or HOLD."  # noqa: E501
         headers = {
             "Content-Type": "application/json",
             "x-goog-api-key": api_key,
@@ -126,6 +131,12 @@ class AIProvider:
                 "temperature": self.config.temperature,
             },
         }
+        if system_prompt:
+            payload["systemInstruction"] = {
+                "parts": [
+                    {"text": system_prompt},
+                ]
+            }
 
         endpoint = f"{self.config.base_url.rstrip('/')}/models/{self.config.model}:generateContent"
         response = self._session.post(endpoint, json=payload, headers=headers, timeout=30)

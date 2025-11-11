@@ -173,4 +173,3 @@ def setup_logging(config: Config) -> None:
                 "Discord logging enabled but bot token or channel IDs are missing."
             )
 
-*** End of File***

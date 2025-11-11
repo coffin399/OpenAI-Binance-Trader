@@ -130,42 +130,49 @@ class AIProvider:
             raise ProviderError("google.genai library not installed")
 
         client = google_genai.Client(api_key=api_key)
-        messages: List[dict[str, str]] = []
+        payload: Dict[str, Any] = {
+            "model": self.config.model,
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [
+                        {"text": prompt},
+                    ],
+                }
+            ],
+            "safety_settings": [],
+            "generation_config": {
+                "temperature": self.config.temperature,
+            },
+        }
         if self.config.system_prompt:
-            messages.append({"role": "system", "content": self.config.system_prompt})
-        messages.append({"role": "user", "content": prompt})
+            payload["system_instruction"] = {
+                "parts": [
+                    {"text": self.config.system_prompt},
+                ]
+            }
 
-        response = client.chat.completions.create(
-            model=self.config.model,
-            messages=messages,
-            temperature=self.config.temperature,
-        )
+        response = client.responses.generate(**payload)
 
-        choices = getattr(response, "choices", None) or []
-        if not choices:
-            raise ProviderError("Gemini SDK returned no choices")
+        candidates = getattr(response, "candidates", None) or []
+        if not candidates:
+            raise ProviderError("Gemini SDK returned no candidates")
 
-        first_choice = choices[0]
-        message = getattr(first_choice, "message", None)
-        text: str = ""
-
-        if isinstance(message, dict):
-            text = (message.get("content") or message.get("text") or "").strip()
-        elif message is not None:
-            text = (
-                getattr(message, "content", None)
-                or getattr(message, "text", "")
-            )
-            if isinstance(text, list):
-                text = " ".join(str(part) for part in text)
-            text = (text or "").strip()
-
-        if not text and hasattr(first_choice, "content"):
-            choice_content = getattr(first_choice, "content")
-            if isinstance(choice_content, str):
-                text = choice_content.strip()
-            elif isinstance(choice_content, list):
-                text = " ".join(str(part) for part in choice_content).strip()
+        first = candidates[0]
+        parts = getattr(getattr(first, "content", None), "parts", None)
+        text = ""
+        if parts:
+            text = " ".join(str(getattr(part, "text", "")) for part in parts).strip()
+        if not text and hasattr(first, "output_text"):
+            text = getattr(first, "output_text", "").strip()
+        if not text and hasattr(first, "content"):
+            content = getattr(first, "content")
+            if isinstance(content, dict):
+                raw = content.get("parts") or content.get("text")
+                if isinstance(raw, list):
+                    text = " ".join(str(item) for item in raw).strip()
+                elif isinstance(raw, str):
+                    text = raw.strip()
 
         if not text:
             raise ProviderError("Gemini SDK returned empty content")

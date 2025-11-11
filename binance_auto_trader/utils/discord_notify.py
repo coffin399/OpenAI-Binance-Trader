@@ -124,5 +124,3 @@ class DiscordNotifier:
         if self._session is not None:
             self._session.close()
         self._enabled = False
-
-```}ми (Oops last newline?). Need to ensure closing triple back quotes? there's none. ensures newline final. We'll add newline. No mania. Need to remove extra backticks? I inserted inadvertently 

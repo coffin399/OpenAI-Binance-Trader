@@ -67,6 +67,9 @@ class AIProvider:
         )
 
     def _call_api(self, prompt: str, api_key: str) -> str:
+        if self.config.name.lower() == "gemini" or "generativelanguage.googleapis.com" in self.config.base_url:
+            return self._call_gemini(prompt, api_key)
+
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
@@ -102,6 +105,46 @@ class AIProvider:
         if not content:
             raise ProviderError("Provider returned empty content")
         return content
+
+    def _call_gemini(self, prompt: str, api_key: str) -> str:
+        headers = {
+            "Content-Type": "application/json",
+            "x-goog-api-key": api_key,
+        }
+        payload = {
+            "model": self.config.model,
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [
+                        {"text": prompt},
+                    ],
+                }
+            ],
+            "safetySettings": [],
+            "generationConfig": {
+                "temperature": self.config.temperature,
+            },
+        }
+
+        endpoint = f"{self.config.base_url.rstrip('/')}/models/{self.config.model}:generateContent"
+        response = self._session.post(endpoint, json=payload, headers=headers, timeout=30)
+        if response.status_code == 401:
+            raise ProviderError("Unauthorized - likely invalid API key")
+        if response.status_code >= 400:
+            raise ProviderError(
+                f"Provider {self.config.name} error {response.status_code}: {response.text}"
+            )
+
+        data = response.json()
+        candidates = data.get("candidates") or []
+        if not candidates:
+            raise ProviderError("Provider returned no candidates")
+        parts = candidates[0].get("content", {}).get("parts", [])
+        text = " ".join(part.get("text", "") for part in parts).strip()
+        if not text:
+            raise ProviderError("Provider returned empty content")
+        return text
 
 
 class AIProviderManager:

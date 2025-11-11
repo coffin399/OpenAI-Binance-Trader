@@ -1,0 +1,7 @@
+python-binance==1.0.19
+pandas==2.1.1
+numpy==1.26.0
+python-dotenv==1.0.0
+ccxt==4.1.13
+websocket-client==1.6.1
+python-dateutil==2.8.2

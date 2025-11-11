@@ -1,0 +1,87 @@
+binance:
+  api_key: ""
+  api_secret: ""
+  testnet: true
+  recv_window_ms: 5000
+
+discord:
+  enabled: true
+  bot_token: ""
+  channel_ids: []
+  rate_limit:
+    max_messages: 15
+    per_seconds: 5
+  ansi_wrap: true
+
+trading:
+  symbols:
+    - BTC/JPY
+    - ETH/JPY
+    - XRP/JPY
+    - SOL/JPY
+    - BNB/JPY
+    - DOGE/JPY
+  timeframe: 4h
+  quantity: 0.0
+  max_open_trades: "0Trades"
+  max_investment_per_trade: "0JPY"
+  # 0Trades で無制限
+  # 0JPY で無制限
+
+strategies:
+  active:
+    - ai_hybrid
+  moving_average_cross:
+    fast_ma: 9
+    slow_ma: 21
+  ai_hybrid:
+    provider: openai
+    prompt_template: |
+      Analyze the recent market candlesticks and suggest BUY, SELL, or HOLD for {symbol} over the next interval.
+      Provide only one of: BUY, SELL, HOLD.
+
+ai:
+  providers:
+    - name: openai
+      base_url: https://api.openai.com/v1
+      model: gpt-4o-mini
+      temperature: 0.2
+      api_keys:
+        - api_key1
+        - api_key2
+    - name: anthropic
+      base_url: https://api.anthropic.com/v1
+      model: claude-3-5-sonnet
+      temperature: 0.2
+      api_keys: []
+
+backtesting:
+  enabled: true
+  lookback_intervals: 200
+  symbols:
+    - BTC/JPY
+    - ETH/JPY
+    - XRP/JPY
+    - SOL/JPY
+    - BNB/JPY
+    - DOGE/JPY
+  timeframe: 4h
+
+risk_management:
+  stop_loss_percent: 1.0
+  take_profit_percent: 2.0
+
+logging:
+  level: INFO
+  file: trading_bot.log
+  console: true
+
+web:
+  enabled: true
+  host: 127.0.0.1
+  port: 8000
+  refresh_interval_seconds: 5
+
+runtime:
+  dry_run: true
+  polling_interval_seconds: 900

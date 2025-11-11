@@ -1,0 +1,147 @@
+from __future__ import annotations
+
+import logging
+import threading
+import time
+from dataclasses import dataclass, field
+from typing import Dict, Iterable, List, Optional
+
+import requests
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ProviderConfig:
+    name: str
+    base_url: str
+    model: str
+    temperature: float = 0.0
+    api_keys: List[str] = field(default_factory=list)
+
+
+class ProviderError(Exception):
+    pass
+
+
+class AllAPIKeysExhausted(ProviderError):
+    pass
+
+
+class AIProvider:
+    def __init__(self, config: ProviderConfig) -> None:
+        self.config = config
+        self._lock = threading.Lock()
+        self._index = 0
+        self._session = requests.Session()
+
+    def _next_key(self) -> str:
+        if not self.config.api_keys:
+            raise AllAPIKeysExhausted(f"No API keys configured for {self.config.name}")
+        with self._lock:
+            key = self.config.api_keys[self._index]
+            self._index = (self._index + 1) % len(self.config.api_keys)
+        return key
+
+    def generate(self, prompt: str, max_attempts: Optional[int] = None) -> str:
+        attempts = 0
+        max_attempts = max_attempts or len(self.config.api_keys)
+
+        while attempts < max_attempts:
+            api_key = self._next_key()
+            attempts += 1
+            try:
+                return self._call_api(prompt, api_key)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "Provider %s failed with key %s (attempt %s/%s): %s",
+                    self.config.name,
+                    api_key[:6] + "..." if api_key else "<empty>",
+                    attempts,
+                    max_attempts,
+                    exc,
+                )
+                time.sleep(0.5)
+        raise AllAPIKeysExhausted(
+            f"All API keys exhausted for provider {self.config.name}"
+        )
+
+    def _call_api(self, prompt: str, api_key: str) -> str:
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": self.config.model,
+            "temperature": self.config.temperature,
+            "messages": [
+                {"role": "system", "content": "You are a trading strategy assistant."},
+                {"role": "user", "content": prompt},
+            ],
+        }
+
+        response = self._session.post(
+            f"{self.config.base_url.rstrip('/')}/chat/completions",
+            json=payload,
+            headers=headers,
+            timeout=30,
+        )
+        if response.status_code == 401:
+            raise ProviderError("Unauthorized - likely invalid API key")
+        if response.status_code >= 400:
+            raise ProviderError(
+                f"Provider {self.config.name} error {response.status_code}: {response.text}"
+            )
+
+        data = response.json()
+        choices = data.get("choices") or []
+        if not choices:
+            raise ProviderError("Provider returned no choices")
+        message = choices[0].get("message", {})
+        content = message.get("content", "").strip()
+        if not content:
+            raise ProviderError("Provider returned empty content")
+        return content
+
+
+class AIProviderManager:
+    def __init__(self, ai_config_section) -> None:
+        self.providers: Dict[str, AIProvider] = {}
+        if not ai_config_section:
+            return
+        providers_config = getattr(ai_config_section, "providers", [])
+        for entry in providers_config:
+            provider = self._build_provider(entry)
+            if provider:
+                self.providers[provider.config.name] = provider
+
+    def _build_provider(self, entry) -> Optional[AIProvider]:
+        try:
+            config = ProviderConfig(
+                name=entry.get("name"),
+                base_url=entry.get("base_url"),
+                model=entry.get("model"),
+                temperature=float(entry.get("temperature", 0.0)),
+                api_keys=list(entry.get("api_keys", [])),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Invalid AI provider configuration: %s", exc)
+            return None
+
+        if not config.name or not config.base_url or not config.model:
+            logger.error("Incomplete AI provider configuration: %s", entry)
+            return None
+
+        return AIProvider(config)
+
+    def has_provider(self, name: str) -> bool:
+        return name in self.providers
+
+    def generate(self, provider_name: str, prompt: str) -> str:
+        provider = self.providers.get(provider_name)
+        if not provider:
+            raise ProviderError(f"Provider '{provider_name}' not configured")
+        return provider.generate(prompt)
+
+    def available_strategies(self) -> Iterable[str]:
+        return self.providers.keys()

@@ -1,0 +1,10 @@
+python-binance==1.0.19
+pandas==2.0.3
+numpy==1.24.3
+python-dateutil==2.8.2
+ccxt==4.0.7
+TA-Lib==0.4.28
+PyYAML==6.0.1
+requests==2.31.0
+fastapi==0.110.0
+uvicorn[standard]==0.29.0

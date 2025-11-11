@@ -10,6 +10,11 @@ import requests
 
 logger = logging.getLogger(__name__)
 
+try:  # Optional dependency for Gemini SDK
+    import google.genai as google_genai
+except ImportError:  # pragma: no cover - optional
+    google_genai = None
+
 
 @dataclass
 class ProviderConfig:
@@ -111,6 +116,63 @@ class AIProvider:
         return content
 
     def _call_gemini(self, prompt: str, api_key: str) -> str:
+        if google_genai is not None:
+            try:
+                return self._call_gemini_sdk(prompt, api_key)
+            except Exception as sdk_error:  # noqa: BLE001 - fallback to REST
+                logger.warning(
+                    "Gemini SDK call failed (%s). Falling back to HTTP request.", sdk_error
+                )
+        return self._call_gemini_http(prompt, api_key)
+
+    def _call_gemini_sdk(self, prompt: str, api_key: str) -> str:
+        if google_genai is None:
+            raise ProviderError("google.genai library not installed")
+
+        client = google_genai.Client(api_key=api_key)
+        messages: List[dict[str, str]] = []
+        if self.config.system_prompt:
+            messages.append({"role": "system", "content": self.config.system_prompt})
+        messages.append({"role": "user", "content": prompt})
+
+        response = client.chat.completions.create(
+            model=self.config.model,
+            messages=messages,
+            temperature=self.config.temperature,
+        )
+
+        choices = getattr(response, "choices", None) or []
+        if not choices:
+            raise ProviderError("Gemini SDK returned no choices")
+
+        first_choice = choices[0]
+        message = getattr(first_choice, "message", None)
+        text: str = ""
+
+        if isinstance(message, dict):
+            text = (message.get("content") or message.get("text") or "").strip()
+        elif message is not None:
+            text = (
+                getattr(message, "content", None)
+                or getattr(message, "text", "")
+            )
+            if isinstance(text, list):
+                text = " ".join(str(part) for part in text)
+            text = (text or "").strip()
+
+        if not text and hasattr(first_choice, "content"):
+            choice_content = getattr(first_choice, "content")
+            if isinstance(choice_content, str):
+                text = choice_content.strip()
+            elif isinstance(choice_content, list):
+                text = " ".join(str(part) for part in choice_content).strip()
+
+        if not text:
+            raise ProviderError("Gemini SDK returned empty content")
+
+        return text
+
+    def _call_gemini_http(self, prompt: str, api_key: str) -> str:
         system_prompt = self.config.system_prompt or "You are a trading strategy assistant. Reply with BUY, SELL, or HOLD."  # noqa: E501
         headers = {
             "Content-Type": "application/json",
@@ -171,12 +233,25 @@ class AIProviderManager:
 
     def _build_provider(self, entry) -> Optional[AIProvider]:
         try:
+            max_attempts = entry.get("max_attempts")
+            if max_attempts is not None:
+                try:
+                    max_attempts = int(max_attempts)
+                except (TypeError, ValueError):
+                    logger.warning(
+                        "Invalid max_attempts for provider %s. Falling back to default.",
+                        entry.get("name"),
+                    )
+                    max_attempts = None
+
             config = ProviderConfig(
                 name=entry.get("name"),
                 base_url=entry.get("base_url"),
                 model=entry.get("model"),
                 temperature=float(entry.get("temperature", 0.0)),
                 api_keys=list(entry.get("api_keys", [])),
+                system_prompt=entry.get("system_prompt"),
+                max_attempts=max_attempts,
             )
         except Exception as exc:  # noqa: BLE001
             logger.error("Invalid AI provider configuration: %s", exc)

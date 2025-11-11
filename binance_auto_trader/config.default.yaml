@@ -66,7 +66,7 @@ ai:
       api_keys:
         - "anthropic-key-1"
     - name: gemini
-      base_url: https://generativelanguage.googleapis.com/v1beta/openai
+      base_url: https://generativelanguage.googleapis.com/v1beta
       model: gemini-2.5-flash
       temperature: 0.2
       api_keys:

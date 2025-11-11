@@ -38,6 +38,7 @@ class ProviderConfig:
     system_prompt: Optional[str] = None
     max_attempts: Optional[int] = None
     headers: Dict[str, str] = field(default_factory=dict)
+    extra_body: Dict[str, Any] = field(default_factory=dict)
 
 
 class ProviderError(Exception):
@@ -117,11 +118,17 @@ class AIProvider:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
 
-        response = client.chat.completions.create(
-            model=self.config.model,
-            temperature=self.config.temperature,
-            messages=messages,
-        )
+        request_kwargs: Dict[str, Any] = {
+            "model": self.config.model,
+            "temperature": self.config.temperature,
+            "messages": messages,
+        }
+        if default_headers:
+            request_kwargs["extra_headers"] = default_headers
+        if self.config.extra_body:
+            request_kwargs["extra_body"] = self.config.extra_body
+
+        response = client.chat.completions.create(**request_kwargs)
 
         choices = getattr(response, "choices", None) or []
         if not choices:

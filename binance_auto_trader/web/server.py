@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import webbrowser
 from typing import Any, Dict
 
 from fastapi import FastAPI
@@ -458,3 +459,7 @@ def start_dashboard(trade_tracker: TradeTracker, config) -> None:
 
     _dashboard_thread = threading.Thread(target=_run_server, daemon=True)
     _dashboard_thread.start()
+    try:
+        webbrowser.open_new_tab(f"http://{host}:{port}")
+    except Exception as err:  # noqa: BLE001
+        logger.warning("Failed to open browser automatically: %s", err)

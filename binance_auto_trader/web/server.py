@@ -257,6 +257,19 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
     <script>
       const REFRESH_INTERVAL = {refresh_interval} * 1000;
       let priceChart;
+      const chartOptions = {
+        animation: false,
+        animations: {
+          tension: { duration: 0 },
+        },
+        plugins: {
+          legend: { labels: { color: '#cbd5f5' } },
+        },
+        scales: {
+          x: { ticks: { color: '#94a3b8' } },
+          y: { ticks: { color: '#94a3b8' } },
+        },
+      };
 
       function formatNumber(value, options = { suffix: '', precision: 2 }) {
         if (value === null || value === undefined) return '—';
@@ -281,20 +294,12 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
         if (priceChart) {
           priceChart.data.labels = labels;
           priceChart.data.datasets = datasets;
-          priceChart.update();
+          priceChart.update('none');
         } else {
           priceChart = new Chart(ctx, {
             type: 'line',
             data: { labels, datasets },
-            options: {
-              plugins: {
-                legend: { labels: { color: '#cbd5f5' } },
-              },
-              scales: {
-                x: { ticks: { color: '#94a3b8' } },
-                y: { ticks: { color: '#94a3b8' } },
-              },
-            },
+            options: chartOptions,
           });
         }
       }

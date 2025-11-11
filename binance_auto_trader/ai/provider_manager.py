@@ -12,8 +12,14 @@ logger = logging.getLogger(__name__)
 
 try:  # Optional dependency for Gemini SDK
     import google.genai as google_genai
+
+    try:
+        GENAI_TYPES = google_genai.types  # type: ignore[attr-defined]
+    except AttributeError:  # pragma: no cover - optional
+        GENAI_TYPES = None
 except ImportError:  # pragma: no cover - optional
     google_genai = None
+    GENAI_TYPES = None
 
 
 @dataclass
@@ -150,16 +156,25 @@ class AIProvider:
             }
         )
 
-        generation_config: Dict[str, Any] = {
-            "temperature": self.config.temperature,
-        }
-
-        response = client.models.generate_content(
-            model=self.config.model,
-            contents=contents,
-            safety_settings=[],
-            generation_config=generation_config,
-        )
+        response = None
+        if GENAI_TYPES is not None and hasattr(GENAI_TYPES, "GenerateContentConfig"):
+            config_kwargs: Dict[str, Any] = {
+                "temperature": self.config.temperature,
+            }
+            config_obj = GENAI_TYPES.GenerateContentConfig(**config_kwargs)
+            response = client.models.generate_content(
+                model=self.config.model,
+                contents=contents,
+                config=config_obj,
+            )
+        else:
+            response = client.models.generate_content(
+                model=self.config.model,
+                contents=contents,
+                generation_config={
+                    "temperature": self.config.temperature,
+                },
+            )
 
         text = getattr(response, "text", "") or ""
         text = text.strip()

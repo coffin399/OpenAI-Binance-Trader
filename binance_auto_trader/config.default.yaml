@@ -57,13 +57,20 @@ ai:
       model: gpt-4o-mini
       temperature: 0.2
       api_keys:
-        - api_key1
-        - api_key2
+        - "sk-YOUR_OPENAI_KEY_1"
+        - "sk-YOUR_OPENAI_KEY_2"
     - name: anthropic
       base_url: https://api.anthropic.com/v1
       model: claude-3-5-sonnet
       temperature: 0.2
-      api_keys: []
+      api_keys:
+        - "anthropic-key-1"
+    - name: gemini
+      base_url: https://generativelanguage.googleapis.com/v1beta/openai
+      model: gemini-2.5-flash
+      temperature: 0.2
+      api_keys:
+        - "GEMINI_API_KEY_1"
 
 backtesting:
   enabled: true

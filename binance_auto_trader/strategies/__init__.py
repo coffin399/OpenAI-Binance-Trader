@@ -6,10 +6,11 @@ from binance_auto_trader.ai.provider_manager import AIProviderManager
 
 from .ai_hybrid import AIHybridStrategy
 from .moving_average_cross import MovingAverageCrossover
-
+from .rsi_mean_reversion import RSIMeanReversionStrategy
 STRATEGY_REGISTRY = {
     "moving_average_cross": MovingAverageCrossover,
     "ai_hybrid": AIHybridStrategy,
+    "rsi_mean_reversion": RSIMeanReversionStrategy,
 }
 
 

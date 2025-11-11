@@ -5,7 +5,7 @@ set "PROJECT_ROOT=%~dp0"
 set "VENV_DIR=%PROJECT_ROOT%venv"
 set "REQUIREMENTS_FILE=%PROJECT_ROOT%binance_auto_trader\requirements.txt"
 
-rem --- Check Python version (require 3.10.x) ---
+rem --- Check Python version (require 3.11.x) ---
 for /f "tokens=2" %%i in ('python --version 2^>^&1') do set "PYTHON_VERSION=%%i"
 for /f "tokens=1,2 delims=." %%a in ("%PYTHON_VERSION%") do (
     set "MAJOR=%%a"
@@ -16,8 +16,8 @@ if not "%MAJOR%"=="3" (
     pause
     exit /b 1
 )
-if not "%MINOR%"=="10" (
-    echo [ERROR] Python 3.10.x is required. Detected: %PYTHON_VERSION%
+if not "%MINOR%"=="11" (
+    echo [ERROR] Python 3.11.x is required. Detected: %PYTHON_VERSION%
     pause
     exit /b 1
 )

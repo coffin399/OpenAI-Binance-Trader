@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from datetime import datetime
 from typing import Dict, List, Optional
 
 from binance_auto_trader.ai.provider_manager import AIProviderManager
@@ -13,6 +14,7 @@ from binance_auto_trader.services.backtester import Backtester
 from binance_auto_trader.services.trade_tracker import TradeTracker
 from binance_auto_trader.strategies import build_strategy
 from binance_auto_trader.strategies.base import Strategy
+from binance_auto_trader.utils.discord_notify import DiscordNotifier
 from binance_auto_trader.utils.helpers import (
     normalize_symbol,
     parse_currency_limit,
@@ -35,6 +37,7 @@ class TradingBot:
 
         self.ai_manager = AIProviderManager(getattr(config, "ai", None))
         self.trade_tracker = TradeTracker(config)
+        self.notifier = DiscordNotifier(config)
 
         symbol_list = getattr(config.trading, "symbols", None)
         if not symbol_list:
@@ -123,8 +126,10 @@ class TradingBot:
             dataframe = Strategy.klines_to_dataframe(klines)
             last_row = dataframe.iloc[-1]
             last_price = float(last_row["close"])
+            live_price = self.exchange.get_symbol_price(exchange_symbol)
+            price_point = live_price if live_price is not None else last_price
             self.trade_tracker.append_price_point(
-                display_symbol, last_row["timestamp"], last_price
+                display_symbol, datetime.utcnow(), price_point
             )
 
             for strategy in self.strategies:
@@ -219,6 +224,16 @@ class TradingBot:
                 price,
                 decision.strategy,
             )
+            try:
+                self.notifier.notify_open(
+                    symbol=display_symbol,
+                    price=price,
+                    quantity=quantity,
+                    strategy=decision.strategy,
+                    action=decision.action,
+                )
+            except Exception:  # noqa: BLE001
+                logger.exception("Failed to send Discord open notification")
 
     def _close_position(
         self,
@@ -253,6 +268,17 @@ class TradingBot:
                 price,
                 closed,
             )
+            if closed:
+                try:
+                    self.notifier.notify_close(
+                        symbol=display_symbol,
+                        entry_price=closed.entry_price,
+                        exit_price=price,
+                        pnl_percent=closed.pnl_percent,
+                        strategy=closed.strategy,
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.exception("Failed to send Discord close notification")
 
     def _submit_order(
         self, exchange_symbol: str, side: str, quantity: float

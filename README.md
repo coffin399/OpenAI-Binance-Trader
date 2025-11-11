@@ -4,7 +4,7 @@
 ![Status](https://img.shields.io/badge/status-experimental-orange)
 ![License](https://img.shields.io/badge/license-MIT-lightgrey)
 
-Binance 向けのマルチストラテジー自動売買プラットフォームです。リアルタイム監視、バックテスト、Discord 通知、複数 AI との連携に対応し、設計の一部は [Harvard Algorithmic Trading with AI](https://github.com/moondevonyt/Harvard-Algorithmic-Trading-with-AI) を参考にしています。
+Binance 向けのマルチストラテジー自動売買プラットフォームです。リアルタイム監視、バックテスト、Discord 通知、複数 AI との連携に対応
 
 > ⚠️ **実験的なベース実装です** — 本ソフトウェアは研究・検証用途を想定しています。収益性や可用性は保証されません。必ず自己責任で利用し、テストネットやドライランで十分に検証した上で本番運用に移行してください。
 

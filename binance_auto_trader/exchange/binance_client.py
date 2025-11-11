@@ -90,3 +90,13 @@ class BinanceClient:
                 "Error creating order for %s: %s", symbol, exc
             )
             return None
+
+    def get_symbol_price(self, symbol: str) -> Optional[float]:
+        try:
+            ticker = self.client.get_symbol_ticker(symbol=symbol)
+            return float(ticker["price"])
+        except Exception as exc:  # noqa: BLE001
+            logging.getLogger(__name__).error(
+                "Error fetching price ticker for %s: %s", symbol, exc
+            )
+            return None

@@ -16,6 +16,8 @@ logger = logging.getLogger(__name__)
 class AIHybridStrategy(Strategy):
     """Strategy that consults an AI provider for trading decisions."""
 
+    supports_backtesting = False
+
     def __init__(self, ai_manager, config_section) -> None:
         super().__init__()
         self.ai_manager = ai_manager

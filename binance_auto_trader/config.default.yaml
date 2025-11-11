@@ -48,6 +48,13 @@ strategies:
       Fast SMA(5): {fast_sma:.4f}
       Slow SMA(20): {slow_sma:.4f}
       Average volume (last 5 candles): {volume_avg:.2f}
+      Volume trend vs avg: {volume_trend:.2f}x
+      Momentum (fast_slow_diff): {momentum:.4f}
+      Range high / low (last 24 candles): {range_high:.4f} / {range_low:.4f}
+      Volatility over range: {volatility_pct:.2f}%
+      RSI(14): {rsi:.2f}
+      Recent close % changes (last 3 intervals): {recent_close_changes}
+      Reply with ONLY one of the following actions based on the next interval outlook: BUY, SELL, or HOLD.
 
   rsi_mean_reversion:
     period: 14

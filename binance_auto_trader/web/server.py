@@ -58,6 +58,54 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
         gap: 18px;
         margin-bottom: 32px;
       }
+      .symbol-strip {
+        display: flex;
+        gap: 16px;
+        overflow-x: auto;
+        padding-bottom: 12px;
+        margin-bottom: 28px;
+        scrollbar-width: thin;
+      }
+      .symbol-tile {
+        min-width: 180px;
+        padding: 16px 18px;
+        border-radius: 16px;
+        background: rgba(15, 23, 42, 0.7);
+        border: 1px solid rgba(148, 163, 184, 0.12);
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        box-shadow: 0 12px 24px rgba(15, 23, 42, 0.25);
+      }
+      .symbol-tile .symbol-title {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 1rem;
+        font-weight: 600;
+      }
+      .symbol-dot {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        display: inline-block;
+      }
+      .symbol-price {
+        font-size: 1.6rem;
+        font-weight: 600;
+      }
+      .symbol-meta {
+        display: flex;
+        gap: 12px;
+        font-size: 0.85rem;
+        color: #94a3b8;
+      }
+      .symbol-change.positive {
+        color: #34d399;
+      }
+      .symbol-change.negative {
+        color: #f87171;
+      }
       .card {
         backdrop-filter: blur(12px);
         background: linear-gradient(145deg, rgba(15, 23, 42, 0.85), rgba(30, 41, 59, 0.75));
@@ -172,6 +220,8 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
         <h1>Binance Auto Trader</h1>
         <p class=\"subtitle\">Live trading telemetry. Mode: <span id=\"mode-pill\" class=\"pill\"></span></p>
       </header>
+
+      <section class=\"symbol-strip\" id=\"symbol-strip\"></section>
 
       <section class=\"grid\">
         <div class=\"card\">
@@ -304,6 +354,60 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
         }
       }
 
+      function renderSymbolStrip(symbols) {
+        const container = document.getElementById('symbol-strip');
+        if (!container) return;
+        container.innerHTML = '';
+        if (!symbols || !symbols.length) {
+          const empty = document.createElement('div');
+          empty.className = 'symbol-tile';
+          empty.innerHTML = '<div class="symbol-title">No symbols configured</div>';
+          container.appendChild(empty);
+          return;
+        }
+
+        symbols.forEach((item) => {
+          const tile = document.createElement('div');
+          tile.className = 'symbol-tile';
+
+          const title = document.createElement('div');
+          title.className = 'symbol-title';
+          title.innerHTML = `<span class="symbol-dot" style="background:${item.color}"></span>${item.symbol}`;
+
+          const price = document.createElement('div');
+          price.className = 'symbol-price';
+          price.textContent = formatNumber(item.price, { precision: 2 }) || '—';
+
+          const meta = document.createElement('div');
+          meta.className = 'symbol-meta';
+
+          const position = document.createElement('span');
+          position.textContent = item.position && item.position !== 'NONE' ? item.position : 'FLAT';
+          meta.appendChild(position);
+
+          const entry = document.createElement('span');
+          entry.textContent = item.entry_price ? `Entry ${formatNumber(item.entry_price, { precision: 2 })}` : 'Entry —';
+          meta.appendChild(entry);
+
+          const change = document.createElement('span');
+          change.className = 'symbol-change';
+          if (typeof item.change_pct === 'number') {
+            const value = Number(item.change_pct).toFixed(2);
+            change.textContent = `${value}%`;
+            change.classList.add(value >= 0 ? 'positive' : 'negative');
+          } else {
+            change.textContent = '0%';
+          }
+          meta.appendChild(change);
+
+          tile.appendChild(title);
+          tile.appendChild(price);
+          tile.appendChild(meta);
+
+          container.appendChild(tile);
+        });
+      }
+
       function renderTradeLists(data) {
         const openEl = document.getElementById('open-trades');
         const recentEl = document.getElementById('recent-trades');
@@ -376,6 +480,8 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
           const summary = await summaryRes.json();
           const prices = await priceRes.json();
           const backtest = await btRes.json();
+
+          renderSymbolStrip(summary.symbols || []);
 
           const modeEl = document.getElementById('mode-pill');
           modeEl.textContent = summary.mode;

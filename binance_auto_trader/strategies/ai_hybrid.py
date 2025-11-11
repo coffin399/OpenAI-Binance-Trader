@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from statistics import mean
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 
 import pandas as pd
 
@@ -74,6 +74,7 @@ class AIHybridStrategy(Strategy):
         timeframe = self._infer_timeframe(df)
 
         recent = df.tail(6)
+        extended = df.tail(24)
         recent_rows = [
             {
                 "timestamp": row["timestamp"].strftime("%Y-%m-%d %H:%M"),
@@ -87,12 +88,41 @@ class AIHybridStrategy(Strategy):
         ]
         closes = [row["close"] for row in recent_rows]
         change_pct = (
-            ((closes[-1] - closes[0]) / closes[0] * 100) if len(closes) > 1 else 0.0
+            ((closes[-1] - closes[0]) / closes[0] * 100) if len(closes) > 1 and closes[0] else 0.0
         )
 
         fast_sma = float(df["close"].rolling(window=5).mean().iloc[-1])
         slow_sma = float(df["close"].rolling(window=20).mean().iloc[-1])
         avg_volume = mean(row["volume"] for row in recent_rows)
+        latest_volume = float(latest["volume"])
+        volume_trend = (latest_volume / avg_volume) if avg_volume else 1.0
+        momentum = fast_sma - slow_sma
+
+        range_high = float(extended["high"].max()) if not extended.empty else float(latest["high"])
+        range_low = float(extended["low"].min()) if not extended.empty else float(latest["low"])
+        volatility_pct = (
+            ((range_high - range_low) / range_low * 100) if range_low else 0.0
+        )
+
+        delta = df["close"].diff()
+        gain = delta.clip(lower=0)
+        loss = (-delta.clip(upper=0)).abs()
+        avg_gain = gain.rolling(window=14, min_periods=14).mean()
+        avg_loss = loss.rolling(window=14, min_periods=14).mean()
+        rs = avg_gain / avg_loss
+        rsi_series = 100 - (100 / (1 + rs))
+        latest_rsi = rsi_series.iloc[-1] if len(rsi_series) else None
+        if pd.isna(latest_rsi):
+            latest_rsi = 50.0
+
+        recent_changes: List[float] = []
+        closes_series = df["close"].tail(5).tolist()
+        for idx in range(1, len(closes_series)):
+            prev_close = closes_series[idx - 1]
+            current_close = closes_series[idx]
+            if prev_close:
+                recent_changes.append((current_close - prev_close) / prev_close * 100)
+        recent_close_changes = ", ".join(f"{value:+.2f}%" for value in recent_changes[-3:]) or "N/A"
 
         latest_candle = {
             "timestamp": recent_rows[-1]["timestamp"],
@@ -125,6 +155,13 @@ class AIHybridStrategy(Strategy):
             "fast_sma": fast_sma,
             "slow_sma": slow_sma,
             "volume_avg": avg_volume,
+            "volume_trend": volume_trend,
+            "range_high": range_high,
+            "range_low": range_low,
+            "volatility_pct": volatility_pct,
+            "rsi": float(latest_rsi) if latest_rsi is not None else 50.0,
+            "momentum": momentum,
+            "recent_close_changes": recent_close_changes,
         }
 
     @staticmethod

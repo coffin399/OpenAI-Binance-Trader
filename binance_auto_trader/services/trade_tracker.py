@@ -3,7 +3,7 @@ from __future__ import annotations
 import threading
 from collections import deque
 from datetime import datetime
-from typing import Deque, Dict, Iterable, List, Optional
+from typing import Deque, Dict, Iterable, List, Optional, Sequence
 import math
 
 from binance_auto_trader.models.trade import BacktestResult, TradeRecord
@@ -29,6 +29,12 @@ class TradeTracker:
         self.dry_run = bool(getattr(config.runtime, "dry_run", True))
         active = getattr(config.strategies, "active", []) if hasattr(config, "strategies") else []
         self.active_strategies = list(active) if isinstance(active, list) else []
+
+        symbols_cfg: Sequence[str] = getattr(config.trading, "symbols", []) if hasattr(config, "trading") else []
+        if isinstance(symbols_cfg, list):
+            self.symbol_order = list(symbols_cfg)
+        else:
+            self.symbol_order = [symbols_cfg] if symbols_cfg else []
 
         self.open_trades: Dict[str, TradeRecord] = {}
         self.closed_trades: List[TradeRecord] = []
@@ -185,6 +191,7 @@ class TradeTracker:
         summary.update({
             "open_trades": open_trades,
             "recent_closed_trades": recent_closed,
+            "symbols": self._build_symbol_summaries(),
         })
         return summary
 
@@ -252,3 +259,61 @@ class TradeTracker:
         if math.isinf(value):  # type: ignore[arg-type]
             return "∞" if value > 0 else "-∞"  # type: ignore[operator]
         return round(float(value), 2)
+
+    def _build_symbol_summaries(self) -> List[Dict[str, object]]:
+        ordered_symbols: List[str] = []
+        seen = set()
+        for symbol in self.symbol_order:
+            if symbol not in seen:
+                ordered_symbols.append(symbol)
+                seen.add(symbol)
+        for symbol in self.price_history.keys():
+            if symbol not in seen:
+                ordered_symbols.append(symbol)
+                seen.add(symbol)
+
+        summaries: List[Dict[str, object]] = []
+        for symbol in ordered_symbols:
+            summaries.append(self._symbol_summary(symbol))
+        return summaries
+
+    def _symbol_summary(self, symbol: str) -> Dict[str, object]:
+        price = self._latest_price(symbol)
+        open_trade = self.open_trades.get(symbol)
+        status = "OPEN" if open_trade else "FLAT"
+        position = open_trade.action if open_trade else "NONE"
+        quantity = open_trade.quantity if open_trade and open_trade.quantity is not None else None
+        entry_price = open_trade.entry_price if open_trade else None
+        change_pct: Optional[float] = None
+        if open_trade and price is not None and open_trade.entry_price:
+            direction = 1 if open_trade.action.upper() == "BUY" else -1
+            try:
+                change_pct = (
+                    (price - open_trade.entry_price) / open_trade.entry_price * 100 * direction
+                )
+            except ZeroDivisionError:
+                change_pct = None
+
+        return {
+            "symbol": symbol,
+            "price": round(price, 4) if price is not None else None,
+            "position": position,
+            "status": status,
+            "change_pct": self._format_metric(change_pct) if change_pct is not None else None,
+            "entry_price": round(entry_price, 4) if entry_price is not None else None,
+            "quantity": round(quantity, 6) if quantity is not None else None,
+            "color": self._ensure_color(symbol),
+            "updated_at": self._latest_timestamp(symbol),
+        }
+
+    def _latest_price(self, symbol: str) -> Optional[float]:
+        history = self.price_history.get(symbol)
+        if history and len(history) > 0:
+            return float(history[-1][1])
+        return None
+
+    def _latest_timestamp(self, symbol: str) -> Optional[str]:
+        history = self.price_history.get(symbol)
+        if history and len(history) > 0:
+            return history[-1][0]
+        return None

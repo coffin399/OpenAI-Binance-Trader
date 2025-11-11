@@ -283,6 +283,7 @@ class TradeTracker:
         status = "OPEN" if open_trade else "FLAT"
         position = open_trade.action if open_trade else "NONE"
         quantity = open_trade.quantity if open_trade and open_trade.quantity is not None else None
+        quantity_value = round(quantity, 6) if quantity is not None else 0.0
         entry_price = open_trade.entry_price if open_trade else None
         change_pct: Optional[float] = None
         if open_trade and price is not None and open_trade.entry_price:
@@ -301,7 +302,8 @@ class TradeTracker:
             "status": status,
             "change_pct": self._format_metric(change_pct) if change_pct is not None else None,
             "entry_price": round(entry_price, 4) if entry_price is not None else None,
-            "quantity": round(quantity, 6) if quantity is not None else None,
+            "quantity": quantity_value,
+            "balance": quantity_value,
             "color": self._ensure_color(symbol),
             "updated_at": self._latest_timestamp(symbol),
         }

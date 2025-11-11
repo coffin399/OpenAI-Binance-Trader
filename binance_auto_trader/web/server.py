@@ -94,6 +94,13 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
         font-size: 1.6rem;
         font-weight: 600;
       }
+      .symbol-price-label {
+        display: block;
+        font-size: 0.8rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: #94a3b8;
+      }
       .symbol-meta {
         display: flex;
         gap: 12px;
@@ -365,7 +372,6 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
           container.appendChild(empty);
           return;
         }
-
         symbols.forEach((item) => {
           const tile = document.createElement('div');
           tile.className = 'symbol-tile';
@@ -374,9 +380,22 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
           title.className = 'symbol-title';
           title.innerHTML = `<span class="symbol-dot" style="background:${item.color}"></span>${item.symbol}`;
 
-          const price = document.createElement('div');
-          price.className = 'symbol-price';
-          price.textContent = formatNumber(item.price, { precision: 2 }) || '—';
+          const balance = document.createElement('div');
+          balance.className = 'symbol-price';
+          const rawBalance = item.balance ?? 0;
+          const numericBalance =
+            typeof rawBalance === 'number' ? rawBalance : Number(rawBalance);
+          const balancePrecision = Math.abs(numericBalance) >= 1 ? 2 : 6;
+          const balanceLabel = document.createElement('span');
+          balanceLabel.className = 'symbol-price-label';
+          balanceLabel.textContent = 'Balance';
+          const balanceValue = document.createElement('span');
+          balanceValue.textContent = formatNumber(numericBalance, {
+            precision: balancePrecision,
+          });
+          balance.title = 'Current balance held for this symbol';
+          balance.appendChild(balanceLabel);
+          balance.appendChild(balanceValue);
 
           const meta = document.createElement('div');
           meta.className = 'symbol-meta';
@@ -401,7 +420,7 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
           meta.appendChild(change);
 
           tile.appendChild(title);
-          tile.appendChild(price);
+          tile.appendChild(balance);
           tile.appendChild(meta);
 
           container.appendChild(tile);

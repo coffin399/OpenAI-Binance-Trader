@@ -37,8 +37,18 @@ strategies:
   ai_hybrid:
     provider: openai
     prompt_template: |
-      Analyze the recent market candlesticks and suggest BUY, SELL, or HOLD for {symbol} over the next interval.
-      Provide only one of: BUY, SELL, HOLD.
+      You are an algorithmic trading assistant making discretionary decisions for {symbol} on the {timeframe} timeframe.
+      Latest candle: {latest_candle}
+      Previous close price: {previous_close:.4f}
+      Recent change over last 5 candles: {recent_change_pct:.2f}%
+      Fast SMA(5): {fast_sma:.4f}
+      Slow SMA(20): {slow_sma:.4f}
+      Average volume (last 5 candles): {volume_avg:.2f}
+
+      Recent candlesticks (oldest -> newest):
+      {recent_candles}
+
+      Reply with ONLY one of the following actions based on the next interval outlook: BUY, SELL, or HOLD.
 
 ai:
   providers:

@@ -37,6 +37,7 @@ class ProviderConfig:
     api_keys: List[str] = field(default_factory=list)
     system_prompt: Optional[str] = None
     max_attempts: Optional[int] = None
+    headers: Dict[str, str] = field(default_factory=dict)
 
 
 class ProviderError(Exception):
@@ -101,6 +102,13 @@ class AIProvider:
         client_kwargs: Dict[str, Any] = {"api_key": api_key}
         if base_url:
             client_kwargs["base_url"] = base_url
+
+        default_headers = dict(self.config.headers)
+        if base_url and "openrouter.ai" in base_url:
+            default_headers.setdefault("HTTP-Referer", "https://github.com/coffin399/OpenAI-Binance-Trader")
+            default_headers.setdefault("X-Title", "OpenAI Binance Trader")
+        if default_headers:
+            client_kwargs["default_headers"] = default_headers
 
         client = OpenAI(**client_kwargs)  # type: ignore[arg-type]
 
@@ -280,14 +288,18 @@ class AIProviderManager:
                     )
                     max_attempts = None
 
+            raw_keys = list(entry.get("api_keys", []))
+            filtered_keys = [key for key in raw_keys if isinstance(key, str) and key.strip()]
+
             config = ProviderConfig(
                 name=entry.get("name"),
                 base_url=entry.get("base_url"),
                 model=entry.get("model"),
                 temperature=float(entry.get("temperature", 0.0)),
-                api_keys=list(entry.get("api_keys", [])),
+                api_keys=filtered_keys,
                 system_prompt=entry.get("system_prompt"),
                 max_attempts=max_attempts,
+                headers=dict(entry.get("headers" or {})),
             )
         except Exception as exc:  # noqa: BLE001
             logger.error("Invalid AI provider configuration: %s", exc)
@@ -296,6 +308,9 @@ class AIProviderManager:
         if not config.name or not config.base_url or not config.model:
             logger.error("Incomplete AI provider configuration: %s", entry)
             return None
+
+        if not config.api_keys:
+            logger.warning("AI provider '%s' has no API keys configured.", config.name)
 
         return AIProvider(config)
 

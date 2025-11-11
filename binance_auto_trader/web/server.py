@@ -386,16 +386,23 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
           const numericBalance =
             typeof rawBalance === 'number' ? rawBalance : Number(rawBalance);
           const balancePrecision = Math.abs(numericBalance) >= 1 ? 2 : 6;
-          const balanceLabel = document.createElement('span');
-          balanceLabel.className = 'symbol-price-label';
-          balanceLabel.textContent = 'Balance';
-          const balanceValue = document.createElement('span');
-          balanceValue.textContent = formatNumber(numericBalance, {
-            precision: balancePrecision,
-          });
+          
+          const cryptoCurrency = item.symbol.split('/')[0] || 'CRYPTO';
+          const balanceJpy = item.balance_jpy ?? null;
+          
+          const cryptoLine = document.createElement('div');
+          cryptoLine.style.fontSize = '0.9rem';
+          cryptoLine.style.color = '#cbd5e1';
+          cryptoLine.textContent = `${formatNumber(numericBalance, { precision: balancePrecision })} ${cryptoCurrency}`;
+          
+          const jpyLine = document.createElement('div');
+          jpyLine.style.fontSize = '0.85rem';
+          jpyLine.style.color = '#94a3b8';
+          jpyLine.textContent = balanceJpy !== null ? `${formatNumber(balanceJpy, { precision: 0 })} JPY` : '— JPY';
+          
           balance.title = 'Current balance held for this symbol';
-          balance.appendChild(balanceLabel);
-          balance.appendChild(balanceValue);
+          balance.appendChild(cryptoLine);
+          balance.appendChild(jpyLine);
 
           const meta = document.createElement('div');
           meta.className = 'symbol-meta';

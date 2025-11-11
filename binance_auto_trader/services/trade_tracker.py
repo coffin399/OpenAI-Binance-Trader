@@ -313,6 +313,10 @@ class TradeTracker:
             except ZeroDivisionError:
                 change_pct = None
 
+        balance_jpy = None
+        if quantity_value and price is not None:
+            balance_jpy = round(quantity_value * price, 2)
+
         return {
             "symbol": symbol,
             "price": round(price, 4) if price is not None else None,
@@ -322,6 +326,7 @@ class TradeTracker:
             "entry_price": round(entry_price, 4) if entry_price is not None else None,
             "quantity": quantity_value,
             "balance": quantity_value,
+            "balance_jpy": balance_jpy,
             "color": self._ensure_color(symbol),
             "updated_at": self._latest_timestamp(symbol),
         }

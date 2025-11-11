@@ -458,4 +458,3 @@ def start_dashboard(trade_tracker: TradeTracker, config) -> None:
 
     _dashboard_thread = threading.Thread(target=_run_server, daemon=True)
     _dashboard_thread.start()
-"""}

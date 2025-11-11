@@ -10,6 +10,7 @@ from binance_auto_trader.models.trade import StrategyDecision
 
 class Strategy(ABC):
     name: str
+    supports_backtesting: bool = True
 
     def __init__(self) -> None:
         self.name = getattr(self, "name", self.__class__.__name__.lower())

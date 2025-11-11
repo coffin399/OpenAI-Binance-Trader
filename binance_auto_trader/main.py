@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from typing import Dict, List, Optional
 
@@ -27,6 +28,10 @@ class TradingBot:
     def __init__(self, config: Config):
         self.config = config
         self.exchange = BinanceClient(config)
+
+        self._stop_event = threading.Event()
+        self._pause_event = threading.Event()
+        self._pause_event.set()
 
         self.ai_manager = AIProviderManager(getattr(config, "ai", None))
         self.trade_tracker = TradeTracker(config)
@@ -89,7 +94,8 @@ class TradingBot:
             "Starting trading bot for symbols: %s", ", ".join(self.symbols_display)
         )
 
-        while True:
+        while not self._stop_event.is_set():
+            self._pause_event.wait()
             cycle_started = time.monotonic()
             try:
                 self._process_cycle()
@@ -280,6 +286,48 @@ class TradingBot:
             return round(quantity, 6)
         return 0.0
 
+    # ------------------------------------------------------------------
+    # External control (Discord commands / orchestration)
+    # ------------------------------------------------------------------
+    def pause_trading(self) -> None:
+        if self._pause_event.is_set():
+            self._pause_event.clear()
+            logger.info("Trading bot paused.")
+
+    def resume_trading(self) -> None:
+        if not self._pause_event.is_set():
+            self._pause_event.set()
+            logger.info("Trading bot resumed.")
+
+    def stop_trading(self) -> None:
+        self._stop_event.set()
+        self._pause_event.set()
+        logger.info("Trading bot stop requested.")
+
+    def close_all_positions(self) -> None:
+        logger.info("Closing all open positions on request.")
+        for display_symbol, position in list(self.positions.items()):
+            if position is None:
+                continue
+            exchange_symbol = self.symbol_map.get(display_symbol, display_symbol)
+            history = self.trade_tracker.price_history.get(display_symbol)
+            price = 0.0
+            if history:
+                price = float(history[-1][1])
+            if price <= 0:
+                klines = self.exchange.get_historical_klines(
+                    exchange_symbol, self.timeframe, limit=1
+                )
+                if klines:
+                    price = float(klines[-1][4])
+            if price <= 0:
+                logger.warning(
+                    "Skipping close for %s — unable to resolve last price.",
+                    display_symbol,
+                )
+                continue
+            self._close_position(display_symbol, exchange_symbol, position, price)
+
 
 def main() -> None:
     config = Config()
@@ -295,7 +343,31 @@ def main() -> None:
         logger.info("Loaded %s backtest result sets", len(backtest_results))
 
     start_dashboard(bot.trade_tracker, config)
-    bot.run()
+
+    trading_thread = threading.Thread(target=bot.run, name="TradingLoop", daemon=True)
+    trading_thread.start()
+
+    try:
+        from binance_auto_trader.discord_bot import start_discord_bot
+    except ImportError:  # pragma: no cover - optional dependency
+        start_discord_bot = None
+
+    discord_runner = None
+    if start_discord_bot is not None:
+        discord_runner = start_discord_bot(config, bot)
+
+    try:
+        while trading_thread.is_alive():
+            trading_thread.join(timeout=1)
+    except KeyboardInterrupt:
+        logger.info("Trading bot stopped by user")
+        bot.stop_trading()
+    except Exception:  # noqa: BLE001
+        logger.exception("Fatal error during execution")
+        bot.stop_trading()
+
+    if discord_runner is not None:
+        discord_runner.stop()
 
 
 if __name__ == "__main__":

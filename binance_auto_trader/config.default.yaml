@@ -66,15 +66,15 @@ ai:
       api_keys:
         - "anthropic-key-1"
     - name: gemini
-      base_url: https://generativelanguage.googleapis.com/v1beta
-      model: gemini-2.5-flash
+      base_url: https://generativelanguage.googleapis.com/v1beta/openai
+      model: gemini-1.5-flash
       temperature: 0.2
       api_keys:
         - "GEMINI_API_KEY_1"
 
 backtesting:
-  enabled: false
-  lookback_intervals: 900
+  enabled: true
+  lookback_intervals: 200
   symbols:
     - BTC/JPY
     - ETH/JPY

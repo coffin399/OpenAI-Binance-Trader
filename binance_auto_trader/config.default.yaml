@@ -55,11 +55,6 @@ strategies:
     oversold: 30
     minimum_history: 50
 
-      Recent candlesticks (oldest -> newest):
-      {recent_candles}
-
-      Reply with ONLY one of the following actions based on the next interval outlook: BUY, SELL, or HOLD.
-
 ai:
   providers:
     - name: openai

@@ -358,7 +358,7 @@ class TradingBot:
                     self.positions[display_symbol] = position_label
                     
                     # 正しい戦略情報を取得
-                    strategy_name = getattr(decision, 'strategy_name', 'ai_hybrid')
+                    strategy_name = getattr(decision, 'strategy_name', 'coffin299')
                     confidence = getattr(decision, 'confidence', 0.5)
                     reasoning = getattr(decision, 'reasoning', 'Direct swap executed')
                     

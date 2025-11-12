@@ -4,12 +4,12 @@ from typing import Dict, Optional
 
 from binance_auto_trader.ai.provider_manager import AIProviderManager
 
-from .ai_hybrid import AIHybridStrategy
+from .coffin299 import Coffin299Strategy
 from .moving_average_cross import MovingAverageCrossover
 from .rsi_mean_reversion import RSIMeanReversionStrategy
 STRATEGY_REGISTRY = {
     "moving_average_cross": MovingAverageCrossover,
-    "ai_hybrid": AIHybridStrategy,
+    "coffin299": Coffin299Strategy,
     "rsi_mean_reversion": RSIMeanReversionStrategy,
 }
 
@@ -23,9 +23,9 @@ def build_strategy(
     if not strategy_cls:
         raise ValueError(f"Strategy '{name}' is not registered")
 
-    if name == "ai_hybrid":
+    if name == "coffin299":
         if ai_manager is None:
-            raise ValueError("AIHybridStrategy requires an AIProviderManager instance")
+            raise ValueError("Coffin299Strategy requires an AIProviderManager instance")
         return strategy_cls(ai_manager, config_section)
 
     if config_section:

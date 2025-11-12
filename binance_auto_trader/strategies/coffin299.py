@@ -14,14 +14,15 @@ from .base import Strategy
 logger = logging.getLogger(__name__)
 
 
-class AIHybridStrategy(Strategy):
-    """Strategy that consults an AI provider for trading decisions with enhanced technical analysis.
+class Coffin299Strategy(Strategy):
+    """Coffin299's AI-powered trading strategy with enhanced technical analysis.
     
-    Improvements:
+    Features:
     - Dynamic confidence calculation based on multiple technical indicators
     - Signal reinforcement using RSI, momentum, and volume trends
     - Enhanced AI response parsing (supports JSON format)
     - Trend detection and volatility-based risk management
+    - Aggressive trading mode for maximum opportunities
     """
 
     supports_backtesting = False
@@ -40,7 +41,7 @@ class AIHybridStrategy(Strategy):
         self.opportunity_detection = getattr(config_section, "opportunity_detection", True)
         
         if not self.provider_name:
-            raise ValueError("AIHybridStrategy requires 'provider' setting")
+            raise ValueError("Coffin299Strategy requires 'provider' setting")
         if not self.ai_manager or not self.ai_manager.has_provider(self.provider_name):
             raise ValueError(f"AI provider '{self.provider_name}' not available")
         self._last_timestamp: Dict[str, pd.Timestamp] = {}

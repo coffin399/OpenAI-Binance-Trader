@@ -17,11 +17,11 @@ trading:
 # 戦略設定
 strategies:
   active:
-    - ai_hybrid
+    - coffin299
   moving_average_cross:
     fast_ma: 9
     slow_ma: 21
-  ai_hybrid:
+  coffin299:
     provider: openrouter
     # Optimized parameters for aggressive and smart trading
     min_confidence: 0.30          # Base confidence threshold (dynamically adjusted)

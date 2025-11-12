@@ -487,8 +487,22 @@ class TradingBot:
             logger.info("AI QUANTITY PRIORITY - ai_quantity: %s, ai_quantity > 0: %s", 
                        ai_quantity, ai_quantity and ai_quantity > 0)
             if ai_quantity and ai_quantity > 0:
-                filtered_quantity = self._apply_lot_size_filter(strategy_decision.symbol if strategy_decision else "BTC/JPY", ai_quantity)
+                # LOT_SIZEフィルターを適用
+                filtered_quantity = self._apply_lot_size_filter(symbol, ai_quantity)
                 logger.info("✅ USING AI QUANTITY: %s -> %s", ai_quantity, filtered_quantity)
+                
+                # 残高チェック（JPYベースの場合）
+                if "JPY" in symbol and last_price > 0:
+                    required_jpy = filtered_quantity * last_price
+                    jpy_balance = self._get_jpy_balance()
+                    if jpy_balance and required_jpy > jpy_balance:
+                        logger.warning("AI quantity exceeds JPY balance: %.0f JPY needed, %.0f JPY available", 
+                                     required_jpy, jpy_balance)
+                        # 残高範囲内で数量を調整
+                        affordable_quantity = (jpy_balance * 0.95) / last_price  # 5%余裕を持たせる
+                        filtered_quantity = self._apply_lot_size_filter(symbol, affordable_quantity)
+                        logger.info("⚠️  ADJUSTED FOR BALANCE: %s", filtered_quantity)
+                
                 return filtered_quantity
         
         # ここには到達しないはず（AI数量優先のため）

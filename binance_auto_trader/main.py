@@ -285,7 +285,7 @@ class TradingBot:
         ):
             return
 
-        quantity = self._determine_quantity(price, decision)
+        quantity = self._determine_quantity(price, decision, display_symbol)
         logger.info("Determined quantity: %s for %s (AI decision quantity: %s)", 
                    quantity, display_symbol, getattr(decision, 'quantity', 'None'))
         
@@ -451,7 +451,7 @@ class TradingBot:
         logger.debug("Submitting order: %s", order_details)
         return self.exchange.create_order(**order_details)
 
-    def _determine_quantity(self, last_price: float, strategy_decision: Optional[StrategyDecision] = None) -> float:
+    def _determine_quantity(self, last_price: float, strategy_decision: Optional[StrategyDecision] = None, symbol: str = "BTC/JPY") -> float:
         logger.info("CONFIG CHECK - fixed_quantity: %s, max_investment: %s, strategy_decision: %s", 
                    self.fixed_quantity, self.max_investment_per_trade, strategy_decision is not None)
         

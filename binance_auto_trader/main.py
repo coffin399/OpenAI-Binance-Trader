@@ -235,6 +235,14 @@ class TradingBot:
                     if total_available >= 500:
                         logger.info("Using held assets. Available: %.0f JPY (cash: %.0f + assets: %.0f)", 
                                    total_available, jpy_balance, available_jpy)
+                        
+                        # 実際に資産を売却してJPYを確保
+                        needed_jpy = 500 - jpy_balance
+                        if needed_jpy > 0 and not self.dry_run:
+                            if self._sell_asset_for_jpy(needed_jpy):
+                                logger.info("Successfully sold assets to secure %.0f JPY", needed_jpy)
+                            else:
+                                logger.warning("Failed to sell assets, proceeding with available balance")
                     else:
                         logger.info("Insufficient total funds (%.0f). Need at least 500 JPY.", total_available)
                         return False
@@ -466,6 +474,84 @@ class TradingBot:
         except Exception as exc:
             logger.error("Error calculating available JPY from assets: %s", exc)
             return 0.0
+    
+    def _sell_asset_for_jpy(self, target_jpy_amount: float) -> bool:
+        """保有資産を売却してJPYを確保."""
+        try:
+            logger.info("Selling assets to secure %.0f JPY", target_jpy_amount)
+            
+            account = self.exchange.client.get_account()
+            secured_jpy = 0.0
+            
+            # 資産をJPY価値でソート（大きいものを優先）
+            assets_to_sell = []
+            
+            for balance in account['balances']:
+                asset = balance['asset']
+                free_qty = float(balance['free'])
+                
+                if asset != 'JPY' and free_qty > 0:
+                    # 対応するシンボルを検索
+                    symbol = None
+                    for display_symbol in self.symbols_display:
+                        if asset in display_symbol:
+                            symbol = display_symbol.replace("/", "")
+                            break
+                    
+                    if symbol:
+                        try:
+                            ticker = self.exchange.client.get_symbol_ticker(symbol=symbol)
+                            current_price = float(ticker['price'])
+                            jpy_value = free_qty * current_price
+                            
+                            assets_to_sell.append({
+                                'asset': asset,
+                                'symbol': symbol,
+                                'quantity': free_qty,
+                                'jpy_value': jpy_value
+                            })
+                            
+                        except Exception as exc:
+                            logger.warning("Could not evaluate asset %s: %s", asset, exc)
+            
+            # JPY価値の大きい順にソート
+            assets_to_sell.sort(key=lambda x: x['jpy_value'], reverse=True)
+            
+            # 必要なJPY額になるまで資産を売却
+            for asset_info in assets_to_sell:
+                if secured_jpy >= target_jpy_amount:
+                    break
+                
+                sell_quantity = asset_info['quantity']
+                symbol = asset_info['symbol']
+                
+                # 売却実行
+                order = self.exchange.create_order(
+                    symbol=symbol,
+                    side="SELL",
+                    quantity=sell_quantity
+                )
+                
+                if order:
+                    secured_jpy += asset_info['jpy_value'] * self.max_asset_utilization
+                    logger.info("Sold %s %s for %.0f JPY", 
+                               asset_info['asset'], sell_quantity, 
+                               asset_info['jpy_value'] * self.max_asset_utilization)
+                    
+                    # trade_trackerからポジションを削除
+                    for display_symbol in self.symbols_display:
+                        if asset_info['asset'] in display_symbol:
+                            if display_symbol in self.trade_tracker.open_trades:
+                                del self.trade_tracker.open_trades[display_symbol]
+                                self.positions[display_symbol] = None
+                            break
+            
+            logger.info("Asset sale completed. Secured %.0f JPY", secured_jpy)
+            return secured_jpy >= target_jpy_amount
+            
+        except Exception as exc:
+            logger.error("Error selling assets for JPY: %s", exc)
+            return False
     
     def _apply_lot_size_filter(self, symbol: str, quantity: float) -> float:
         """BinanceのLOT_SIZEフィルターを適用して数量を調整."""

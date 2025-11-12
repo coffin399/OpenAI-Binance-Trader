@@ -110,6 +110,9 @@ class TradingBot:
 
         if self.dry_run:
             logger.info("Running in dry-run mode. No live orders will be sent.")
+        
+        # 起動時にウォレット通知を送信
+        self._send_initial_wallet_notification()
 
     def _initialize_strategies(self, strategy_names) -> List[Strategy]:
         if not strategy_names:
@@ -250,13 +253,19 @@ class TradingBot:
             )
             return False
         
-        # 現金残高チェック（JPYのみからエントリー開始）
-        if self.allow_start_from_cash and open_trade_count == 0:
+        # 現金残高チェック（BUY注文時は常にチェック）
+        if side == "BUY":
             jpy_balance = self._get_jpy_balance()
             if jpy_balance is None:
                 logger.warning("Unable to get JPY balance. Skipping entry.")
                 return False
-            if jpy_balance < 500:  # 最低500JPY必要（少額スタート対応）
+            
+            # 必要なJPY額を計算（概算）
+            estimated_jpy_needed = 500  # 最低額
+            
+            if jpy_balance < estimated_jpy_needed:
+                logger.info("JPY balance (%.0f) is below minimum (%.0f)", jpy_balance, estimated_jpy_needed)
+                
                 # 保有資産を活用する場合
                 if self.use_held_assets:
                     # 資産間直接交換を試みる
@@ -267,28 +276,29 @@ class TradingBot:
                     # 従来通りJPYに変換する方法
                     available_jpy = self._get_available_jpy_from_assets()
                     total_available = jpy_balance + available_jpy
-                    if total_available >= 500:
+                    if total_available >= estimated_jpy_needed:
                         logger.info("Using held assets. Available: %.0f JPY (cash: %.0f + assets: %.0f)", 
                                    total_available, jpy_balance, available_jpy)
                         
                         # 実際に資産を売却してJPYを確保
-                        needed_jpy = 500 - jpy_balance
+                        needed_jpy = estimated_jpy_needed - jpy_balance
                         if needed_jpy > 0 and not self.dry_run:
                             if self._sell_asset_for_jpy(needed_jpy):
                                 logger.info("Successfully sold assets to secure %.0f JPY", needed_jpy)
                             else:
                                 logger.warning("Failed to sell assets, proceeding with available balance")
                     else:
-                        logger.info("Insufficient total funds (%.0f). Need at least 500 JPY.", total_available)
+                        logger.info("Insufficient total funds (%.0f). Need at least %.0f JPY.", total_available, estimated_jpy_needed)
                         return False
                 else:
                     logger.info(
-                        "Insufficient JPY balance (%.0f). Need at least 500 JPY to start trading.",
-                        jpy_balance
+                        "Insufficient JPY balance (%.0f). Need at least %.0f JPY to start trading.",
+                        jpy_balance,
+                        estimated_jpy_needed
                     )
                     return False
             else:
-                logger.info("Starting from cash position. JPY balance: %.0f", jpy_balance)
+                logger.info("JPY balance check passed: %.0f JPY available", jpy_balance)
 
         return True
 
@@ -546,6 +556,31 @@ class TradingBot:
         except Exception as exc:
             logger.error("Error getting account balances: %s", exc)
     
+    def _send_initial_wallet_notification(self) -> None:
+        """起動時にウォレット通知を送信."""
+        try:
+            # ウォレット情報を取得
+            wallet_summary = self.trade_tracker._get_wallet_summary()
+            current_total = wallet_summary.get("total_jpy_value", 0.0)
+            assets = wallet_summary.get("assets", [])
+            
+            # 初期値を設定
+            self._initial_wallet_value = current_total
+            self._last_wallet_value = current_total
+            self._last_wallet_notification = time.time()
+            
+            # 起動時通知を送信
+            self.wallet_notifier.notify_wallet_summary(
+                total_jpy=current_total,
+                assets=assets,
+                hourly_change=0.0,
+                total_change=0.0
+            )
+            logger.info("🚀 Initial wallet summary sent: %.0f JPY", current_total)
+            
+        except Exception as exc:
+            logger.error("Error sending initial wallet summary: %s", exc)
+    
     def _notify_wallet_summary(self) -> None:
         """1時間ごとにウォレットサマリーを通知."""
         try:
@@ -559,22 +594,6 @@ class TradingBot:
             wallet_summary = self.trade_tracker._get_wallet_summary()
             current_total = wallet_summary.get("total_jpy_value", 0.0)
             assets = wallet_summary.get("assets", [])
-            
-            # 初回起動時の値を記録
-            if self._initial_wallet_value == 0.0:
-                self._initial_wallet_value = current_total
-                self._last_wallet_value = current_total
-                self._last_wallet_notification = current_time
-                
-                # 初回通知
-                self.wallet_notifier.notify_wallet_summary(
-                    total_jpy=current_total,
-                    assets=assets,
-                    hourly_change=0.0,
-                    total_change=0.0
-                )
-                logger.info("Initial wallet summary sent: %.0f JPY", current_total)
-                return
             
             # 変化額を計算
             hourly_change = current_total - self._last_wallet_value

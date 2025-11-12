@@ -55,47 +55,74 @@ class WalletDiscordNotifier:
         hourly_change: Optional[float] = None,
         total_change: Optional[float] = None,
     ) -> None:
-        """ウォレットサマリーを通知."""
+        """ウォレットサマリーを通知（Embed形式）."""
         if not self._enabled:
             return
         
-        # アセットリストを作成
-        asset_lines = []
-        for asset in assets:
-            if asset["asset"] != "JPY":  # JPYは総額に含まれているので表示しない
-                asset_lines.append(
-                    f"• **{asset['asset']}**: `{asset['quantity']:.6f}` "
-                    f"(`{asset['jpy_value']:.0f} JPY`)"
-                )
-        
-        # 変化額をフォーマット
-        change_lines = []
-        if hourly_change is not None:
-            direction = "▲" if hourly_change >= 0 else "▼"
-            change_lines.append(f"1H Change: `{direction} {hourly_change:+.0f} JPY`")
-        
+        # Embedカラーを決定（総変化に基づく）
         if total_change is not None:
-            direction = "▲" if total_change >= 0 else "▼"
-            change_lines.append(f"Total Change: `{direction} {total_change:+.0f} JPY`")
-        
-        message = (
-            f"💰 **Wallet Summary**\n"
-            f"Total Value: `{total_jpy:.0f} JPY`\n"
-            f"\n"
-            f"**Assets:**\n"
-        )
-        
-        if asset_lines:
-            message += "\n".join(asset_lines[:5])  # 最大5資産まで表示
-            if len(asset_lines) > 5:
-                message += f"\n• ... and {len(asset_lines) - 5} more"
+            if total_change > 0:
+                color = 0x22C55E  # 緑（利益）
+            elif total_change < 0:
+                color = 0xEF4444  # 赤（損失）
+            else:
+                color = 0x6366F1  # 青（変化なし）
         else:
-            message += "• Only JPY balance"
+            color = 0x6366F1  # デフォルト青
         
-        if change_lines:
-            message += f"\n\n**Performance:**\n" + "\n".join(change_lines)
+        # Embedフィールドを作成
+        fields = []
         
-        self._send(message)
+        # 総額フィールド
+        fields.append({
+            "name": "💰 Total Value",
+            "value": f"```{total_jpy:,.0f} JPY```",
+            "inline": False
+        })
+        
+        # 資産リスト
+        asset_text = ""
+        non_jpy_assets = [a for a in assets if a["asset"] != "JPY"]
+        
+        if non_jpy_assets:
+            for asset in non_jpy_assets[:5]:  # 最大5資産
+                asset_text += f"**{asset['asset']}**: `{asset['quantity']:.6f}` ({asset['jpy_value']:.0f} JPY)\n"
+            
+            if len(non_jpy_assets) > 5:
+                asset_text += f"_... and {len(non_jpy_assets) - 5} more assets_"
+        else:
+            asset_text = "_Only JPY balance_"
+        
+        fields.append({
+            "name": "📊 Assets",
+            "value": asset_text,
+            "inline": False
+        })
+        
+        # パフォーマンス
+        if hourly_change is not None or total_change is not None:
+            performance_text = ""
+            
+            if hourly_change is not None:
+                direction = "📈" if hourly_change >= 0 else "📉"
+                performance_text += f"{direction} **1H Change**: `{hourly_change:+,.0f} JPY`\n"
+            
+            if total_change is not None:
+                direction = "📈" if total_change >= 0 else "📉"
+                performance_text += f"{direction} **Total Change**: `{total_change:+,.0f} JPY`"
+            
+            fields.append({
+                "name": "📈 Performance",
+                "value": performance_text,
+                "inline": False
+            })
+        
+        # Embedを送信
+        self._send_embed(
+            title="💼 Wallet Summary",
+            color=color,
+            fields=fields
+        )
 
     def _send(self, content: str) -> None:
         if not self._enabled or not self._session:
@@ -129,6 +156,59 @@ class WalletDiscordNotifier:
                     )
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Failed to send Discord wallet alert: %s", exc)
+
+    def _send_embed(
+        self,
+        title: str,
+        color: int,
+        fields: list[dict[str, object]],
+        description: Optional[str] = None,
+    ) -> None:
+        """Embed形式でメッセージを送信."""
+        if not self._enabled or not self._session:
+            return
+        
+        headers = {
+            "Authorization": f"Bot {self._bot_token}",
+            "Content-Type": "application/json",
+        }
+        
+        embed = {
+            "title": title,
+            "color": color,
+            "fields": fields,
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
+        }
+        
+        if description:
+            embed["description"] = description
+        
+        for channel_id in self._channel_ids:
+            self._respect_rate_limit(channel_id)
+            payload = {"embeds": [embed]}
+            
+            try:
+                response = self._session.post(
+                    f"{DISCORD_API_BASE}/channels/{channel_id}/messages",
+                    headers=headers,
+                    json=payload,
+                    timeout=10,
+                )
+                if response.status_code == 429:
+                    retry_after = response.json().get("retry_after", 1)
+                    time.sleep(float(retry_after))
+                    self._session.post(
+                        f"{DISCORD_API_BASE}/channels/{channel_id}/messages",
+                        headers=headers,
+                        json=payload,
+                        timeout=10,
+                    )
+                elif response.status_code >= 400:
+                    logger.warning(
+                        "Discord embed failed for channel %s: %s", channel_id, response.text
+                    )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Failed to send Discord embed: %s", exc)
 
     def _respect_rate_limit(self, channel_id: str) -> None:
         timestamps = self._timestamps.setdefault(channel_id, deque())

@@ -332,6 +332,21 @@ class TradingBot:
                 price,
             )
             return
+        
+        # NOTIONAL（最小取引金額）チェック
+        min_notional = self._get_min_notional(display_symbol)
+        notional_value = quantity * price
+        
+        if notional_value < min_notional:
+            logger.warning(
+                "Order skipped for %s. NOTIONAL value %.2f JPY below minimum %.2f JPY (qty=%.8f, price=%.2f)",
+                display_symbol,
+                notional_value,
+                min_notional,
+                quantity,
+                price,
+            )
+            return
 
         if self.max_total_investment > 0:
             current_total = self.trade_tracker.get_total_open_value()
@@ -445,18 +460,25 @@ class TradingBot:
         filtered_quantity = self._apply_lot_size_filter(display_symbol, quantity)
         logger.info("Adjusted close quantity for %s: %.8f -> %.8f", display_symbol, quantity, filtered_quantity)
         
-        # 最小数量チェック（Binanceの一般的な最小値）
-        min_quantity_threshold = 0.00001  # 1e-05
-        if filtered_quantity < min_quantity_threshold:
+        # NOTIONAL（最小取引金額）チェック
+        min_notional = self._get_min_notional(display_symbol)
+        notional_value = filtered_quantity * price
+        
+        logger.info("NOTIONAL check for %s: value=%.2f JPY, min=%.2f JPY", 
+                   display_symbol, notional_value, min_notional)
+        
+        if notional_value < min_notional:
             logger.warning(
-                "Close position skipped for %s. Quantity %.8f below minimum threshold %.8f. Removing stale position.",
+                "Close position skipped for %s. NOTIONAL value %.2f JPY below minimum %.2f JPY. Removing stale position.",
                 display_symbol,
-                filtered_quantity,
-                min_quantity_threshold,
+                notional_value,
+                min_notional,
             )
             # 古いポジションデータを削除
             self.positions[display_symbol] = None
             self.trade_tracker.open_trades.pop(display_symbol, None)
+            logger.info("✅ Removed stale position for %s (qty=%.8f, value=%.2f JPY)", 
+                       display_symbol, filtered_quantity, notional_value)
             return
 
         order = self._submit_order(exchange_symbol, side, filtered_quantity)

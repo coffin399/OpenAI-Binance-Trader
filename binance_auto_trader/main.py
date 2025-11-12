@@ -253,8 +253,9 @@ class TradingBot:
             )
             return False
         
-        # 現金残高チェック（BUY注文時は常にチェック）
+        # 残高チェック
         if side == "BUY":
+            # BUY注文時はJPY残高をチェック
             jpy_balance = self._get_jpy_balance()
             if jpy_balance is None:
                 logger.warning("Unable to get JPY balance. Skipping entry.")
@@ -299,6 +300,24 @@ class TradingBot:
                     return False
             else:
                 logger.info("JPY balance check passed: %.0f JPY available", jpy_balance)
+        
+        elif side == "SELL":
+            # SELL注文時は対象資産の残高をチェック
+            asset = display_symbol.split("/")[0] if "/" in display_symbol else display_symbol.replace("JPY", "")
+            try:
+                asset_balance = self.exchange.get_account_balance(asset)
+                if asset_balance is None or asset_balance <= 0:
+                    logger.warning(
+                        "Cannot SELL %s: No %s balance (balance: %s)",
+                        display_symbol,
+                        asset,
+                        asset_balance or 0
+                    )
+                    return False
+                logger.info("%s balance check passed: %.8f %s available", asset, asset_balance, asset)
+            except Exception as exc:
+                logger.error("Error checking %s balance: %s", asset, exc)
+                return False
 
         return True
 

@@ -56,7 +56,7 @@ strategies:
       
       📝 RESPONSE FORMAT:
       Reply with: BUY, SELL, or HOLD
-      Preferred: JSON {"action": "BUY/SELL/HOLD", "confidence": 0.0-1.0, "reasoning": "brief explanation"}
+      Preferred: JSON {{"action": "BUY/SELL/HOLD", "confidence": 0.0-1.0, "reasoning": "brief explanation"}}
 
 # AIプロバイダー設定
 ai:

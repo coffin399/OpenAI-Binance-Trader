@@ -220,15 +220,12 @@ class TradingBot:
             if current_position == "SHORT":
                 return
             if current_position == "LONG":
+                # Close existing LONG position (spot trading - no new SHORT position)
                 self._close_position(display_symbol, exchange_symbol, "LONG", last_price)
-            self._open_position(
-                display_symbol,
-                exchange_symbol,
-                "SHORT",
-                "SELL",
-                decision,
-                last_price,
-            )
+                return  # Don't open SHORT position in spot trading
+            # Only open SHORT if no position exists and margin trading is enabled
+            # For spot trading, SELL without position is ignored
+            logger.debug("%s: SELL signal ignored - no LONG position to close (spot trading)", display_symbol)
 
     def _should_open_position(
         self,
@@ -499,19 +496,46 @@ class TradingBot:
         logger.info("NOTIONAL check for %s: value=%.2f JPY, min=%.2f JPY", 
                    display_symbol, notional_value, min_notional)
         
+        # NOTIONAL制限を満たさない場合、実際の保有量全てを売却してみる
         if notional_value < min_notional:
             logger.warning(
-                "Close position skipped for %s. NOTIONAL value %.2f JPY below minimum %.2f JPY. Removing stale position.",
-                display_symbol,
+                "NOTIONAL value %.2f JPY below minimum %.2f JPY. Attempting to sell all holdings.",
                 notional_value,
                 min_notional,
             )
-            # 古いポジションデータを削除
-            self.positions[display_symbol] = None
-            self.trade_tracker.open_trades.pop(display_symbol, None)
-            logger.info("✅ Removed stale position for %s (qty=%.8f, value=%.2f JPY)", 
-                       display_symbol, filtered_quantity, notional_value)
-            return
+            
+            # 実際の保有量を取得
+            try:
+                base_asset = display_symbol.split('/')[0]
+                balance = self.exchange.get_balance(base_asset)
+                if balance and balance > 0:
+                    actual_quantity = self._apply_lot_size_filter(display_symbol, balance)
+                    actual_notional = actual_quantity * price
+                    logger.info("%s: Actual holdings: %.8f, notional: %.2f JPY", 
+                               display_symbol, actual_quantity, actual_notional)
+                    
+                    if actual_notional >= min_notional:
+                        filtered_quantity = actual_quantity
+                        logger.info("✅ Using actual holdings to meet NOTIONAL: %.8f", actual_quantity)
+                    else:
+                        logger.warning(
+                            "Even full holdings (%.8f, %.2f JPY) below NOTIONAL minimum. Removing stale position.",
+                            actual_quantity,
+                            actual_notional,
+                        )
+                        self.positions[display_symbol] = None
+                        self.trade_tracker.open_trades.pop(display_symbol, None)
+                        return
+                else:
+                    logger.warning("No %s balance found. Removing stale position.", base_asset)
+                    self.positions[display_symbol] = None
+                    self.trade_tracker.open_trades.pop(display_symbol, None)
+                    return
+            except Exception as e:
+                logger.exception("Error checking balance for %s: %s", display_symbol, e)
+                self.positions[display_symbol] = None
+                self.trade_tracker.open_trades.pop(display_symbol, None)
+                return
 
         order = self._submit_order(exchange_symbol, side, filtered_quantity)
         if order:

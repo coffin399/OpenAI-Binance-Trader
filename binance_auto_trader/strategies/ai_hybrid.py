@@ -32,10 +32,12 @@ class AIHybridStrategy(Strategy):
         self.provider_name = getattr(config_section, "provider", None)
         self.prompt_template = getattr(config_section, "prompt_template", "")
         
-        # Enhanced configuration
-        self.min_confidence = getattr(config_section, "min_confidence", 0.6)
+        # Enhanced configuration for aggressive trading
+        self.min_confidence = getattr(config_section, "min_confidence", 0.35)
         self.aggressive_mode = getattr(config_section, "aggressive_mode", True)
         self.use_technical_signals = getattr(config_section, "use_technical_signals", True)
+        self.dynamic_threshold = getattr(config_section, "dynamic_threshold", True)
+        self.opportunity_detection = getattr(config_section, "opportunity_detection", True)
         
         if not self.provider_name:
             raise ValueError("AIHybridStrategy requires 'provider' setting")
@@ -77,26 +79,48 @@ class AIHybridStrategy(Strategy):
             ai_action, ai_confidence, technical_signals, prompt_context
         )
         
-        # Apply minimum confidence threshold
-        if final_confidence < self.min_confidence:
+        # Dynamic confidence threshold based on market conditions
+        effective_threshold = self._get_dynamic_threshold(technical_signals, prompt_context)
+        
+        # Detect high-probability opportunities
+        is_strong_opportunity = self._detect_opportunity(ai_action, technical_signals, prompt_context)
+        
+        # Apply minimum confidence threshold (relaxed for strong opportunities)
+        if is_strong_opportunity:
+            effective_threshold *= 0.7  # Lower threshold for strong opportunities
+            logger.debug("%s: Strong opportunity detected, threshold: %.2f", symbol, effective_threshold)
+        
+        if final_confidence < effective_threshold:
             logger.info(
                 "%s: Confidence %.2f below threshold %.2f, skipping trade",
-                symbol, final_confidence, self.min_confidence
+                symbol, final_confidence, effective_threshold
             )
             return None
 
-        # Check if technical signals reinforce AI decision
-        if self.use_technical_signals:
+        # Check if technical signals reinforce AI decision (relaxed in aggressive mode)
+        if self.use_technical_signals and not self.aggressive_mode:
             signal_agreement = self._check_signal_agreement(ai_action, technical_signals)
-            if not signal_agreement and not self.aggressive_mode:
+            if not signal_agreement:
                 logger.info(
                     "%s: Technical signals do not support %s, skipping (conservative mode)",
                     symbol, ai_action
                 )
                 return None
         
-        if ai_action == "HOLD" and not self.aggressive_mode:
-            return None
+        # In aggressive mode, consider HOLD as potential trade opportunity
+        if ai_action == "HOLD":
+            if self.aggressive_mode and is_strong_opportunity:
+                # Override HOLD with technical signal direction
+                if technical_signals["combined_signal"] > 0.3:
+                    ai_action = "BUY"
+                    logger.info("%s: Overriding HOLD -> BUY (strong bullish signals)", symbol)
+                elif technical_signals["combined_signal"] < -0.3:
+                    ai_action = "SELL"
+                    logger.info("%s: Overriding HOLD -> SELL (strong bearish signals)", symbol)
+                else:
+                    return None
+            else:
+                return None
 
         price = float(df.iloc[-1]["close"])
         info_parts = [f"AI: {ai_action} (conf: {ai_confidence:.2f})", f"Final: {final_confidence:.2f}"]
@@ -260,16 +284,16 @@ class AIHybridStrategy(Strategy):
         slow_sma = context["slow_sma"]
         latest_price = context["latest_price"]
         
-        # RSI signals (oversold/overbought)
+        # RSI signals (oversold/overbought) - More aggressive thresholds
         rsi_signal = 0.0
-        if rsi < 30:
+        if rsi < 35:
             rsi_signal = 1.0  # Strong buy signal
-        elif rsi < 40:
-            rsi_signal = 0.5  # Moderate buy signal
-        elif rsi > 70:
+        elif rsi < 45:
+            rsi_signal = 0.6  # Moderate buy signal
+        elif rsi > 65:
             rsi_signal = -1.0  # Strong sell signal
-        elif rsi > 60:
-            rsi_signal = -0.5  # Moderate sell signal
+        elif rsi > 55:
+            rsi_signal = -0.6  # Moderate sell signal
         
         # Momentum/Trend signals
         momentum_signal = 0.0
@@ -353,11 +377,14 @@ class AIHybridStrategy(Strategy):
             elif trend == "bullish":
                 confidence -= 0.1
         
-        # Volatility adjustment (higher volatility = lower confidence) - Reduced penalties
+        # Volatility adjustment - Use volatility as opportunity indicator
+        # High volatility = more trading opportunities in aggressive mode
         if volatility > 8.0:
-            confidence -= 0.08
+            confidence += 0.05  # High volatility = more opportunities
         elif volatility > 5.0:
-            confidence -= 0.04
+            confidence += 0.03  # Moderate volatility = some opportunities
+        elif volatility < 2.0:
+            confidence -= 0.05  # Low volatility = fewer opportunities
         
         # Ensure confidence is in valid range
         return max(0.0, min(1.0, confidence))
@@ -367,7 +394,7 @@ class AIHybridStrategy(Strategy):
         action: str,
         technical_signals: Dict
     ) -> bool:
-        """Check if technical signals agree with AI decision.
+        """Check if technical signals agree with AI decision (relaxed thresholds).
         
         Returns:
             bool: True if signals agree or are neutral
@@ -375,11 +402,76 @@ class AIHybridStrategy(Strategy):
         combined_signal = technical_signals["combined_signal"]
         
         if action == "BUY":
-            return combined_signal > -0.3  # Allow neutral or positive signals
+            return combined_signal > -0.5  # Very relaxed - allow weak contrary signals
         elif action == "SELL":
-            return combined_signal < 0.3  # Allow neutral or negative signals
+            return combined_signal < 0.5  # Very relaxed - allow weak contrary signals
         else:
             return True  # HOLD is always acceptable
+    
+    def _get_dynamic_threshold(self, technical_signals: Dict, context: Dict) -> float:
+        """Calculate dynamic confidence threshold based on market conditions.
+        
+        Returns:
+            float: Adjusted confidence threshold
+        """
+        if not self.dynamic_threshold:
+            return self.min_confidence
+        
+        threshold = self.min_confidence
+        trend = technical_signals["trend"]
+        volatility = technical_signals["volatility"]
+        combined_signal = technical_signals["combined_signal"]
+        
+        # Lower threshold in strong trending markets
+        if trend in ["bullish", "bearish"] and abs(combined_signal) > 0.4:
+            threshold *= 0.85  # 15% lower threshold in strong trends
+        
+        # Lower threshold in high volatility (more opportunities)
+        if volatility > 6.0:
+            threshold *= 0.9  # 10% lower threshold in volatile markets
+        
+        return max(0.25, threshold)  # Never go below 0.25
+    
+    def _detect_opportunity(self, action: str, technical_signals: Dict, context: Dict) -> bool:
+        """Detect strong trading opportunities.
+        
+        Returns:
+            bool: True if strong opportunity detected
+        """
+        if not self.opportunity_detection:
+            return False
+        
+        rsi = technical_signals["rsi"]
+        combined_signal = technical_signals["combined_signal"]
+        trend = technical_signals["trend"]
+        volume_signal = technical_signals["volume_signal"]
+        momentum_signal = technical_signals["momentum_signal"]
+        
+        # Strong buy opportunities
+        if action == "BUY":
+            # Oversold with volume confirmation
+            if rsi < 40 and volume_signal > 0.3:
+                return True
+            # Strong bullish momentum with trend alignment
+            if momentum_signal > 0.5 and trend == "bullish":
+                return True
+            # Combined strong signal
+            if combined_signal > 0.5:
+                return True
+        
+        # Strong sell opportunities
+        elif action == "SELL":
+            # Overbought with volume confirmation
+            if rsi > 60 and volume_signal > 0.3:
+                return True
+            # Strong bearish momentum with trend alignment
+            if momentum_signal < -0.5 and trend == "bearish":
+                return True
+            # Combined strong signal
+            if combined_signal < -0.5:
+                return True
+        
+        return False
     
     @staticmethod
     def _infer_timeframe(df: pd.DataFrame) -> str:

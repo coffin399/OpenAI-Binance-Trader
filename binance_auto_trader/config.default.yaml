@@ -37,25 +37,40 @@ strategies:
     slow_ma: 21
   ai_hybrid:
     provider: openrouter
-    # Enhanced parameters for smarter trading
-    min_confidence: 0.4          # Minimum confidence threshold (0.0-1.0) - Lowered for more trades
-    aggressive_mode: true         # True = more trades, False = conservative
+    # Optimized parameters for aggressive and smart trading
+    min_confidence: 0.30          # Base confidence threshold (dynamically adjusted)
+    aggressive_mode: true         # Enable aggressive trading mode
     use_technical_signals: true   # Use technical indicators to validate AI decisions
+    dynamic_threshold: true       # Adjust threshold based on market conditions
+    opportunity_detection: true   # Enhanced opportunity detection
     prompt_template: |
-      AGGRESSIVE MOMENTUM TRADER: {symbol} ({timeframe})
+      🎯 SMART AGGRESSIVE TRADER: {symbol} ({timeframe})
       
-      DATA: Price {previous_close:.4f} | Δ{recent_change_pct:.2f}% | RSI {rsi:.2f} | Vol {volume_trend:.2f}x | Mom {momentum:.4f}
+      📊 MARKET DATA:
+      Price: {previous_close:.4f} | Change: {recent_change_pct:+.2f}%
+      RSI: {rsi:.2f} | Volume: {volume_trend:.2f}x | Momentum: {momentum:.4f}
+      Trend: {fast_sma:.4f} / {slow_sma:.4f} | Volatility: {volatility_pct:.2f}%
       
-      RULES:
-      BUY = RSI<65 + momentum>0 + (volume>1.2x OR recent_change>1%)
-      SELL = RSI>70 OR momentum<-0.001 OR volume<0.8x
-      HOLD = Neutral/ranging
+      🚀 TRADING RULES (AGGRESSIVE):
+      BUY when:
+        - RSI < 45 (oversold zone) OR
+        - Momentum > 0 + Volume > 1.2x OR
+        - Recent change > +0.8% with volume confirmation
       
-      Target: +4% gains | Max loss: -2%
-      Bias: FAVOR action over inaction when signals align
+      SELL when:
+        - RSI > 55 (overbought zone) OR
+        - Momentum < -0.0005 OR
+        - Volume drops < 0.8x with negative momentum
       
-      Reply ONLY: BUY, SELL, or HOLD
-      (Optional: JSON format with {"action": "BUY", "confidence": 0.8, "reasoning": "..."})
+      HOLD only when market is truly neutral (rare!)
+      
+      🎯 OBJECTIVES:
+      Target: +4% gains | Stop: -2% loss
+      Philosophy: Act decisively on opportunities, avoid analysis paralysis
+      
+      📝 RESPONSE FORMAT:
+      Reply with: BUY, SELL, or HOLD
+      Preferred: JSON {"action": "BUY/SELL/HOLD", "confidence": 0.0-1.0, "reasoning": "brief explanation"}
 
 ai:
   providers:

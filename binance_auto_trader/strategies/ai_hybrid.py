@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from statistics import mean
 from typing import Dict, Optional, List
@@ -14,7 +15,14 @@ logger = logging.getLogger(__name__)
 
 
 class AIHybridStrategy(Strategy):
-    """Strategy that consults an AI provider for trading decisions."""
+    """Strategy that consults an AI provider for trading decisions with enhanced technical analysis.
+    
+    Improvements:
+    - Dynamic confidence calculation based on multiple technical indicators
+    - Signal reinforcement using RSI, momentum, and volume trends
+    - Enhanced AI response parsing (supports JSON format)
+    - Trend detection and volatility-based risk management
+    """
 
     supports_backtesting = False
 
@@ -23,6 +31,12 @@ class AIHybridStrategy(Strategy):
         self.ai_manager = ai_manager
         self.provider_name = getattr(config_section, "provider", None)
         self.prompt_template = getattr(config_section, "prompt_template", "")
+        
+        # Enhanced configuration
+        self.min_confidence = getattr(config_section, "min_confidence", 0.6)
+        self.aggressive_mode = getattr(config_section, "aggressive_mode", True)
+        self.use_technical_signals = getattr(config_section, "use_technical_signals", True)
+        
         if not self.provider_name:
             raise ValueError("AIHybridStrategy requires 'provider' setting")
         if not self.ai_manager or not self.ai_manager.has_provider(self.provider_name):
@@ -50,22 +64,54 @@ class AIHybridStrategy(Strategy):
             logger.exception("AI provider call failed for %s: %s", symbol, exc)
             return None
 
-        action = response.strip().upper().split()[0]
-        if action not in {"BUY", "SELL", "HOLD"}:
-            logger.warning("AI provider returned unsupported action '%s'", action)
+        # Parse AI response (supports both simple text and JSON format)
+        ai_action, ai_confidence, ai_reasoning = self._parse_ai_response(response)
+        
+        if ai_action not in {"BUY", "SELL", "HOLD"}:
+            logger.warning("AI provider returned unsupported action '%s'", ai_action)
             return None
 
-        if action == "HOLD":
+        # Calculate dynamic confidence based on technical indicators
+        technical_signals = self._calculate_technical_signals(df, prompt_context)
+        final_confidence = self._calculate_confidence(
+            ai_action, ai_confidence, technical_signals, prompt_context
+        )
+        
+        # Apply minimum confidence threshold
+        if final_confidence < self.min_confidence:
+            logger.info(
+                "%s: Confidence %.2f below threshold %.2f, skipping trade",
+                symbol, final_confidence, self.min_confidence
+            )
+            return None
+
+        # Check if technical signals reinforce AI decision
+        if self.use_technical_signals:
+            signal_agreement = self._check_signal_agreement(ai_action, technical_signals)
+            if not signal_agreement and not self.aggressive_mode:
+                logger.info(
+                    "%s: Technical signals do not support %s, skipping (conservative mode)",
+                    symbol, ai_action
+                )
+                return None
+        
+        if ai_action == "HOLD" and not self.aggressive_mode:
             return None
 
         price = float(df.iloc[-1]["close"])
+        info_parts = [f"AI: {ai_action} (conf: {ai_confidence:.2f})", f"Final: {final_confidence:.2f}"]
+        if ai_reasoning:
+            info_parts.append(f"Reason: {ai_reasoning[:50]}")
+        info_parts.append(f"RSI: {technical_signals['rsi']:.1f}")
+        info_parts.append(f"Trend: {technical_signals['trend']}")
+        
         return StrategyDecision(
             symbol=symbol,
             strategy=self.name,
-            action=action,
+            action=ai_action,
             price=price,
-            confidence=0.5,
-            info=f"AI decision: {action}",
+            confidence=final_confidence,
+            info=" | ".join(info_parts),
         )
 
     def _build_prompt_context(self, df: pd.DataFrame, symbol: str) -> Dict[str, object]:
@@ -164,6 +210,177 @@ class AIHybridStrategy(Strategy):
             "recent_close_changes": recent_close_changes,
         }
 
+    def _parse_ai_response(self, response: str) -> tuple[str, float, str]:
+        """Parse AI response, supporting both simple text and JSON format.
+        
+        Returns:
+            tuple: (action, confidence, reasoning)
+        """
+        response = response.strip()
+        
+        # Try to parse as JSON first
+        try:
+            data = json.loads(response)
+            action = data.get("action", "").upper()
+            confidence = float(data.get("confidence", 0.5))
+            reasoning = data.get("reasoning", "")
+            return action, confidence, reasoning
+        except (json.JSONDecodeError, ValueError, KeyError):
+            pass
+        
+        # Fallback to simple text parsing
+        action = response.upper().split()[0] if response else "HOLD"
+        confidence = 0.5
+        reasoning = ""
+        
+        # Try to extract confidence from text (e.g., "BUY 0.8" or "BUY (80%)")
+        parts = response.split()
+        if len(parts) > 1:
+            try:
+                conf_str = parts[1].strip("()%")
+                confidence = float(conf_str)
+                if confidence > 1.0:
+                    confidence /= 100.0
+            except ValueError:
+                pass
+        
+        return action, confidence, reasoning
+    
+    def _calculate_technical_signals(self, df: pd.DataFrame, context: Dict) -> Dict[str, float]:
+        """Calculate technical trading signals.
+        
+        Returns:
+            dict: Technical indicators and signals
+        """
+        rsi = context["rsi"]
+        momentum = context["momentum"]
+        volume_trend = context["volume_trend"]
+        volatility = context["volatility_pct"]
+        fast_sma = context["fast_sma"]
+        slow_sma = context["slow_sma"]
+        latest_price = context["latest_price"]
+        
+        # RSI signals (oversold/overbought)
+        rsi_signal = 0.0
+        if rsi < 30:
+            rsi_signal = 1.0  # Strong buy signal
+        elif rsi < 40:
+            rsi_signal = 0.5  # Moderate buy signal
+        elif rsi > 70:
+            rsi_signal = -1.0  # Strong sell signal
+        elif rsi > 60:
+            rsi_signal = -0.5  # Moderate sell signal
+        
+        # Momentum/Trend signals
+        momentum_signal = 0.0
+        if momentum > 0:
+            momentum_signal = min(momentum / latest_price * 100, 1.0)  # Bullish
+        else:
+            momentum_signal = max(momentum / latest_price * 100, -1.0)  # Bearish
+        
+        # Volume trend signal
+        volume_signal = 0.0
+        if volume_trend > 1.5:
+            volume_signal = 0.5  # High volume confirms trend
+        elif volume_trend < 0.7:
+            volume_signal = -0.3  # Low volume weakens signal
+        
+        # Trend detection
+        trend = "neutral"
+        if fast_sma > slow_sma * 1.01:
+            trend = "bullish"
+        elif fast_sma < slow_sma * 0.99:
+            trend = "bearish"
+        
+        # Combined signal strength (-1 to 1)
+        combined_signal = (rsi_signal * 0.4 + momentum_signal * 0.4 + volume_signal * 0.2)
+        
+        return {
+            "rsi": rsi,
+            "rsi_signal": rsi_signal,
+            "momentum_signal": momentum_signal,
+            "volume_signal": volume_signal,
+            "combined_signal": combined_signal,
+            "trend": trend,
+            "volatility": volatility,
+        }
+    
+    def _calculate_confidence(
+        self,
+        action: str,
+        ai_confidence: float,
+        technical_signals: Dict,
+        context: Dict
+    ) -> float:
+        """Calculate final confidence score based on AI and technical analysis.
+        
+        Returns:
+            float: Confidence score (0.0 to 1.0)
+        """
+        combined_signal = technical_signals["combined_signal"]
+        trend = technical_signals["trend"]
+        volatility = technical_signals["volatility"]
+        
+        # Start with AI confidence
+        confidence = ai_confidence
+        
+        # Adjust based on technical signal agreement
+        if action == "BUY":
+            if combined_signal > 0.3:
+                confidence += 0.15  # Strong technical support
+            elif combined_signal > 0:
+                confidence += 0.08  # Moderate technical support
+            elif combined_signal < -0.3:
+                confidence -= 0.2  # Technical contradiction
+            
+            # Trend alignment bonus
+            if trend == "bullish":
+                confidence += 0.1
+            elif trend == "bearish":
+                confidence -= 0.1
+                
+        elif action == "SELL":
+            if combined_signal < -0.3:
+                confidence += 0.15  # Strong technical support
+            elif combined_signal < 0:
+                confidence += 0.08  # Moderate technical support
+            elif combined_signal > 0.3:
+                confidence -= 0.2  # Technical contradiction
+            
+            # Trend alignment bonus
+            if trend == "bearish":
+                confidence += 0.1
+            elif trend == "bullish":
+                confidence -= 0.1
+        
+        # Volatility adjustment (higher volatility = lower confidence)
+        if volatility > 5.0:
+            confidence -= 0.1
+        elif volatility > 3.0:
+            confidence -= 0.05
+        
+        # Ensure confidence is in valid range
+        return max(0.0, min(1.0, confidence))
+    
+    def _check_signal_agreement(
+        self,
+        action: str,
+        technical_signals: Dict
+    ) -> bool:
+        """Check if technical signals agree with AI decision.
+        
+        Returns:
+            bool: True if signals agree or are neutral
+        """
+        combined_signal = technical_signals["combined_signal"]
+        
+        if action == "BUY":
+            return combined_signal > -0.3  # Allow neutral or positive signals
+        elif action == "SELL":
+            return combined_signal < 0.3  # Allow neutral or negative signals
+        else:
+            return True  # HOLD is always acceptable
+    
     @staticmethod
     def _infer_timeframe(df: pd.DataFrame) -> str:
         if len(df) < 2:

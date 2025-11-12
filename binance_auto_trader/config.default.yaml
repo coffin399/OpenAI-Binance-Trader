@@ -37,6 +37,10 @@ strategies:
     slow_ma: 21
   ai_hybrid:
     provider: openrouter
+    # Enhanced parameters for smarter trading
+    min_confidence: 0.6          # Minimum confidence threshold (0.0-1.0)
+    aggressive_mode: true         # True = more trades, False = conservative
+    use_technical_signals: true   # Use technical indicators to validate AI decisions
     prompt_template: |
       AGGRESSIVE MOMENTUM TRADER: {symbol} ({timeframe})
       
@@ -51,6 +55,7 @@ strategies:
       Bias: FAVOR action over inaction when signals align
       
       Reply ONLY: BUY, SELL, or HOLD
+      (Optional: JSON format with {"action": "BUY", "confidence": 0.8, "reasoning": "..."})
 
 ai:
   providers:

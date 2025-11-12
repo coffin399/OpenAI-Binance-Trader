@@ -72,6 +72,12 @@ class TradingBot:
         self.allow_start_from_cash = getattr(
             getattr(config, "initial_capital", {}), "allow_start_from_cash", True
         )
+        
+        # 保有資産活用設定
+        asset_config = getattr(config, "asset_management", {})
+        self.use_held_assets = getattr(asset_config, "use_held_assets", False)
+        self.max_asset_utilization = getattr(asset_config, "max_asset_utilization", 0.8)
+        self.prefer_profitable_assets = getattr(asset_config, "prefer_profitable_assets", True)
         self.polling_interval = int(
             getattr(config.runtime, "polling_interval_seconds", 60)
         )
@@ -222,12 +228,24 @@ class TradingBot:
                 logger.warning("Unable to get JPY balance. Skipping entry.")
                 return False
             if jpy_balance < 500:  # 最低500JPY必要（少額スタート対応）
-                logger.info(
-                    "Insufficient JPY balance (%.0f). Need at least 500 JPY to start trading.",
-                    jpy_balance
-                )
-                return False
-            logger.info("Starting from cash position. JPY balance: %.0f", jpy_balance)
+                # 保有資産を活用する場合
+                if self.use_held_assets:
+                    available_jpy = self._get_available_jpy_from_assets()
+                    total_available = jpy_balance + available_jpy
+                    if total_available >= 500:
+                        logger.info("Using held assets. Available: %.0f JPY (cash: %.0f + assets: %.0f)", 
+                                   total_available, jpy_balance, available_jpy)
+                    else:
+                        logger.info("Insufficient total funds (%.0f). Need at least 500 JPY.", total_available)
+                        return False
+                else:
+                    logger.info(
+                        "Insufficient JPY balance (%.0f). Need at least 500 JPY to start trading.",
+                        jpy_balance
+                    )
+                    return False
+            else:
+                logger.info("Starting from cash position. JPY balance: %.0f", jpy_balance)
 
         return True
 
@@ -407,6 +425,48 @@ class TradingBot:
             logger.error("Error getting JPY balance: %s", exc)
             return None
     
+    def _get_available_jpy_from_assets(self) -> float:
+        """保有資産を売却して得られるJPY額を計算."""
+        try:
+            account = self.exchange.client.get_account()
+            total_jpy_value = 0.0
+            
+            for balance in account['balances']:
+                asset = balance['asset']
+                free_qty = float(balance['free'])
+                
+                if asset != 'JPY' and free_qty > 0:
+                    # 現在価格を取得
+                    try:
+                        # 対応するシンボルを検索
+                        symbol = None
+                        for display_symbol in self.symbols_display:
+                            if asset in display_symbol:
+                                symbol = display_symbol.replace("/", "")
+                                break
+                        
+                        if symbol:
+                            ticker = self.exchange.client.get_symbol_ticker(symbol=symbol)
+                            current_price = float(ticker['price'])
+                            jpy_value = free_qty * current_price
+                            
+                            # 利用率を適用
+                            usable_jpy = jpy_value * self.max_asset_utilization
+                            total_jpy_value += usable_jpy
+                            
+                            logger.debug("Asset %s: qty=%s price=%s JPY_value=%.0f usable=%.0f", 
+                                       asset, free_qty, current_price, jpy_value, usable_jpy)
+                    
+                    except Exception as exc:
+                        logger.warning("Could not get price for asset %s: %s", asset, exc)
+            
+            logger.info("Total available JPY from assets: %.0f", total_jpy_value)
+            return total_jpy_value
+            
+        except Exception as exc:
+            logger.error("Error calculating available JPY from assets: %s", exc)
+            return 0.0
+    
     def _apply_lot_size_filter(self, symbol: str, quantity: float) -> float:
         """BinanceのLOT_SIZEフィルターを適用して数量を調整."""
         try:
@@ -414,18 +474,11 @@ class TradingBot:
             exchange_symbol = symbol.replace("/", "")
             symbol_info = None
             
-            # 利用可能なシンボル情報を検索
-            for s in self.exchange.client.futures_exchange_info()['symbols'] if hasattr(self.exchange.client, 'futures_exchange_info') else []:
+            # スポット取引のシンボル情報を取得
+            for s in self.exchange.client.get_exchange_info()['symbols']:
                 if s['symbol'] == exchange_symbol:
                     symbol_info = s
                     break
-            
-            # スポット取引のシンボル情報を取得
-            if not symbol_info:
-                for s in self.exchange.client.get_exchange_info()['symbols']:
-                    if s['symbol'] == exchange_symbol:
-                        symbol_info = s
-                        break
             
             if symbol_info:
                 # LOT_SIZEフィルターを取得

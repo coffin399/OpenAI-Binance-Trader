@@ -1,0 +1,66 @@
+# Coffin299 Strategy - Freqtrade-style Configuration
+# LLM polling rate control for autonomous operation
+
+strategies:
+  coffin299:
+    provider: "openai"  # or "anthropic", "gemini"
+    prompt_template: |
+      Analyze {symbol} market data and provide trading decision.
+      Current price: {latest_price}
+      RSI: {rsi:.1f}
+      Trend: {momentum}
+      Recent change: {recent_change_pct:.2f}%
+      
+      Respond with: BUY, SELL, or HOLD
+    
+    # === LLM Polling Control (freqtrade-style) ===
+    llm_polling_interval: 3600  # seconds (1 hour = 3600, 30 min = 1800, 15 min = 900)
+    technical_only_mode: false  # true = pure technical analysis, no LLM
+    llm_confidence_boost: 0.15  # LLM adds this much confidence when available
+    
+    # === Trading Parameters ===
+    min_confidence: 0.35
+    aggressive_mode: true
+    use_technical_signals: true
+    dynamic_threshold: true
+    opportunity_detection: true
+    
+    # === Position Management ===
+    track_positions: true
+    take_profit_pct: 2.0   # 2% profit taking
+    stop_loss_pct: 1.5     # 1.5% stop loss
+
+# === Usage Examples ===
+#
+# 1. LLM every 1 hour (default, recommended):
+#    llm_polling_interval: 3600
+#    technical_only_mode: false
+#
+# 2. LLM every 30 minutes (more frequent):
+#    llm_polling_interval: 1800
+#    technical_only_mode: false
+#
+# 3. LLM every 4 hours (very infrequent):
+#    llm_polling_interval: 14400
+#    technical_only_mode: false
+#
+# 4. Pure technical analysis (no LLM, like freqtrade):
+#    llm_polling_interval: 3600  # ignored
+#    technical_only_mode: true
+#
+# 5. LLM only on first run, then technical:
+#    llm_polling_interval: 86400  # 24 hours
+#    technical_only_mode: false
+
+# === How it works ===
+#
+# - First evaluation: Always uses LLM to get initial market sentiment
+# - Subsequent evaluations: Uses cached LLM decision + technical analysis
+# - After interval: Queries LLM again to refresh market view
+# - Between intervals: Autonomous operation using technical indicators
+#
+# Benefits:
+# - Reduced API costs (fewer LLM calls)
+# - Faster execution (no LLM latency most of the time)
+# - Autonomous operation (continues even if LLM fails)
+# - Freqtrade-style reliability with AI enhancement

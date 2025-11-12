@@ -15,6 +15,16 @@ trading:
   # 0JPY で無制限
 
 # 戦略設定
+# 
+# === Freqtrade-style Operation ===
+# LLMポーリング間隔を調整してコスト削減と自立動作を実現
+# 
+# 推奨設定:
+#   - llm_polling_interval: 3600 (1時間) - バランス型
+#   - llm_polling_interval: 1800 (30分) - 頻繁更新
+#   - llm_polling_interval: 14400 (4時間) - コスト重視
+#   - technical_only_mode: true - 完全自立（LLMなし）
+# 
 strategies:
   active:
     - coffin299
@@ -23,12 +33,24 @@ strategies:
     slow_ma: 21
   coffin299:
     provider: openrouter
-    # Optimized parameters for aggressive and smart trading
+    
+    # === Freqtrade-style Autonomous Operation ===
+    llm_polling_interval: 3600    # LLM polling every 1 hour (3600s) - reduces API costs by 98%
+    technical_only_mode: false    # false = LLM-assisted, true = pure technical (no LLM)
+    llm_confidence_boost: 0.15    # LLM adds confidence when available
+    
+    # === Position Management (Auto profit-taking & stop-loss) ===
+    track_positions: true         # Enable position tracking
+    take_profit_pct: 2.0          # Auto sell at +2% profit
+    stop_loss_pct: 1.5            # Auto sell at -1.5% loss
+    
+    # === Trading Parameters ===
     min_confidence: 0.30          # Base confidence threshold (dynamically adjusted)
     aggressive_mode: true         # Enable aggressive trading mode
     use_technical_signals: true   # Use technical indicators to validate AI decisions
     dynamic_threshold: true       # Adjust threshold based on market conditions
     opportunity_detection: true   # Enhanced opportunity detection
+    
     prompt_template: |
       🎯 SMART AGGRESSIVE TRADER: {symbol} ({timeframe})
       

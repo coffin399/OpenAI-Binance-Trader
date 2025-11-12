@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timedelta
 from statistics import mean
 from typing import Dict, Optional, List
 
@@ -45,12 +46,18 @@ class Coffin299Strategy(Strategy):
         self.take_profit_pct = getattr(config_section, "take_profit_pct", 2.0)  # 2%利益確定
         self.stop_loss_pct = getattr(config_section, "stop_loss_pct", 1.5)  # 1.5%損切り
         
+        # LLM polling rate control (freqtrade-style autonomous operation)
+        self.llm_polling_interval = getattr(config_section, "llm_polling_interval", 3600)  # seconds (default: 1 hour)
+        self.technical_only_mode = getattr(config_section, "technical_only_mode", False)  # Pure technical analysis
+        self.llm_confidence_boost = getattr(config_section, "llm_confidence_boost", 0.15)  # LLM adds confidence
+        
         if not self.provider_name:
             raise ValueError("Coffin299Strategy requires 'provider' setting")
         if not self.ai_manager or not self.ai_manager.has_provider(self.provider_name):
             raise ValueError(f"AI provider '{self.provider_name}' not available")
         self._last_timestamp: Dict[str, pd.Timestamp] = {}
         self._positions: Dict[str, Dict] = {}  # {symbol: {"entry_price": float, "quantity": float}}
+        self._llm_cache: Dict[str, Dict] = {}  # {symbol: {"action": str, "confidence": float, "timestamp": datetime}}
 
     def evaluate(self, df: pd.DataFrame, symbol: str) -> Optional[StrategyDecision]:
         prompt_context = self._build_prompt_context(df, symbol)
@@ -58,23 +65,55 @@ class Coffin299Strategy(Strategy):
         if symbol in self._last_timestamp and self._last_timestamp[symbol] == latest_timestamp:
             return None
         self._last_timestamp[symbol] = latest_timestamp
-        try:
-            prompt = self.prompt_template.format(**prompt_context)
-        except KeyError as exc:  # noqa: BLE001
-            missing = exc.args[0]
-            logger.warning(
-                "Prompt template missing key '%s'. Falling back to basic format.",
-                missing,
-            )
-            prompt = self.prompt_template.format(symbol=symbol)
-        try:
-            response = self.ai_manager.generate(self.provider_name, prompt)
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("AI provider call failed for %s: %s", symbol, exc)
-            return None
-
-        # Parse AI response (supports both simple text and JSON format)
-        ai_action, ai_confidence, ai_reasoning = self._parse_ai_response(response)
+        
+        # Check if we should use LLM or rely on technical analysis only
+        use_llm = self._should_use_llm(symbol)
+        
+        if use_llm and not self.technical_only_mode:
+            # LLM-assisted decision (polled at configured interval)
+            try:
+                prompt = self.prompt_template.format(**prompt_context)
+            except KeyError as exc:  # noqa: BLE001
+                missing = exc.args[0]
+                logger.warning(
+                    "Prompt template missing key '%s'. Falling back to basic format.",
+                    missing,
+                )
+                prompt = self.prompt_template.format(symbol=symbol)
+            try:
+                response = self.ai_manager.generate(self.provider_name, prompt)
+                ai_action, ai_confidence, ai_reasoning = self._parse_ai_response(response)
+                
+                # Cache LLM response
+                self._llm_cache[symbol] = {
+                    "action": ai_action,
+                    "confidence": ai_confidence,
+                    "reasoning": ai_reasoning,
+                    "timestamp": datetime.now(),
+                }
+                logger.info("%s: LLM decision cached - %s (%.2f)", symbol, ai_action, ai_confidence)
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("AI provider call failed for %s: %s", symbol, exc)
+                # Fall back to cached LLM or technical-only
+                if symbol in self._llm_cache:
+                    cached = self._llm_cache[symbol]
+                    ai_action = cached["action"]
+                    ai_confidence = cached["confidence"] * 0.8  # Reduce confidence for stale cache
+                    ai_reasoning = f"[CACHED] {cached['reasoning']}"
+                    logger.info("%s: Using cached LLM decision (reduced confidence)", symbol)
+                else:
+                    return self._technical_only_decision(df, symbol, prompt_context)
+        else:
+            # Technical-only decision (autonomous operation)
+            if symbol in self._llm_cache:
+                cached = self._llm_cache[symbol]
+                ai_action = cached["action"]
+                ai_confidence = cached["confidence"] * 0.9  # Slightly reduce confidence
+                ai_reasoning = f"[CACHED] {cached['reasoning']}"
+                logger.debug("%s: Using cached LLM guidance", symbol)
+            else:
+                # Pure technical analysis
+                return self._technical_only_decision(df, symbol, prompt_context)
         
         if ai_action not in {"BUY", "SELL", "HOLD"}:
             logger.warning("AI provider returned unsupported action '%s'", ai_action)
@@ -559,6 +598,126 @@ class Coffin299Strategy(Strategy):
             final_quantity = max(10.0, min(final_quantity, 200.0))      # 10円〜200円相当
         
         return round(final_quantity, 6)
+    
+    def _should_use_llm(self, symbol: str) -> bool:
+        """Determine if we should query LLM based on polling interval.
+        
+        Returns:
+            bool: True if LLM should be queried
+        """
+        if self.technical_only_mode:
+            return False
+        
+        if symbol not in self._llm_cache:
+            return True  # First time, always use LLM
+        
+        last_llm_time = self._llm_cache[symbol]["timestamp"]
+        elapsed = (datetime.now() - last_llm_time).total_seconds()
+        
+        if elapsed >= self.llm_polling_interval:
+            logger.info("%s: LLM polling interval reached (%.1f min elapsed)", 
+                       symbol, elapsed / 60)
+            return True
+        
+        logger.debug("%s: Using cached LLM (%.1f min remaining)", 
+                    symbol, (self.llm_polling_interval - elapsed) / 60)
+        return False
+    
+    def _technical_only_decision(self, df: pd.DataFrame, symbol: str, context: Dict) -> Optional[StrategyDecision]:
+        """Make trading decision based purely on technical analysis (freqtrade-style).
+        
+        Returns:
+            Optional[StrategyDecision]: Trading decision or None
+        """
+        logger.info("%s: Technical-only mode - autonomous decision", symbol)
+        
+        # Calculate technical signals
+        technical_signals = self._calculate_technical_signals(df, context)
+        price = float(df.iloc[-1]["close"])
+        
+        # Check position exit first (profit taking / stop loss)
+        position_action = self._check_position_exit(symbol, price, technical_signals)
+        if position_action:
+            logger.info("%s: Position exit signal (technical): %s", symbol, position_action)
+            return StrategyDecision(
+                symbol=symbol,
+                strategy=self.name,
+                action=position_action,
+                price=price,
+                confidence=0.75,  # High confidence for position management
+                info=f"Technical exit | RSI: {technical_signals['rsi']:.1f} | Signal: {technical_signals['combined_signal']:+.2f}",
+                quantity=None,
+            )
+        
+        # Determine action based on technical signals
+        rsi = technical_signals["rsi"]
+        combined_signal = technical_signals["combined_signal"]
+        trend = technical_signals["trend"]
+        momentum_signal = technical_signals["momentum_signal"]
+        
+        action = "HOLD"
+        confidence = 0.5
+        
+        # Strong BUY signals
+        if rsi < 30 and combined_signal > 0.4:
+            action = "BUY"
+            confidence = 0.7
+        elif rsi < 35 and combined_signal > 0.5 and trend == "bullish":
+            action = "BUY"
+            confidence = 0.75
+        elif combined_signal > 0.6 and momentum_signal > 0.5:
+            action = "BUY"
+            confidence = 0.65
+        
+        # Strong SELL signals
+        elif rsi > 70 and combined_signal < -0.4:
+            action = "SELL"
+            confidence = 0.7
+        elif rsi > 65 and combined_signal < -0.5 and trend == "bearish":
+            action = "SELL"
+            confidence = 0.75
+        elif combined_signal < -0.6 and momentum_signal < -0.5:
+            action = "SELL"
+            confidence = 0.65
+        
+        # Moderate signals
+        elif rsi < 40 and combined_signal > 0.3:
+            action = "BUY"
+            confidence = 0.55
+        elif rsi > 60 and combined_signal < -0.3:
+            action = "SELL"
+            confidence = 0.55
+        
+        # Apply minimum confidence threshold
+        if confidence < self.min_confidence:
+            logger.debug("%s: Technical confidence %.2f below threshold %.2f", 
+                        symbol, confidence, self.min_confidence)
+            return None
+        
+        if action == "HOLD":
+            return None
+        
+        # Calculate quantity
+        ai_quantity = None
+        if self.aggressive_mode:
+            ai_quantity = self._calculate_ai_quantity(price, technical_signals, context)
+        
+        info_parts = [
+            f"Technical: {action} (conf: {confidence:.2f})",
+            f"RSI: {rsi:.1f}",
+            f"Signal: {combined_signal:+.2f}",
+            f"Trend: {trend}",
+        ]
+        
+        return StrategyDecision(
+            symbol=symbol,
+            strategy=self.name,
+            action=action,
+            price=price,
+            confidence=confidence,
+            info=" | ".join(info_parts),
+            quantity=ai_quantity,
+        )
     
     def _check_position_exit(self, symbol: str, current_price: float, technical_signals: Dict) -> Optional[str]:
         """Check if we should exit current position (profit taking or stop loss).

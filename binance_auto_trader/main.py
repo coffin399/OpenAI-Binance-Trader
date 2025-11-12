@@ -429,8 +429,10 @@ class TradingBot:
         open_record = self.trade_tracker.open_trades.get(display_symbol)
         if open_record and open_record.quantity:
             quantity = open_record.quantity
+            logger.info("Closing position for %s: recorded quantity=%.8f", display_symbol, quantity)
         else:
             quantity = self._determine_quantity(price, None)
+            logger.warning("No open record for %s, using determined quantity=%.8f", display_symbol, quantity)
 
         if quantity <= 0:
             logger.warning(
@@ -438,8 +440,26 @@ class TradingBot:
                 display_symbol,
             )
             return
+        
+        # LOT_SIZEフィルターを適用してクローズ数量を調整
+        filtered_quantity = self._apply_lot_size_filter(display_symbol, quantity)
+        logger.info("Adjusted close quantity for %s: %.8f -> %.8f", display_symbol, quantity, filtered_quantity)
+        
+        # 最小数量チェック（Binanceの一般的な最小値）
+        min_quantity_threshold = 0.00001  # 1e-05
+        if filtered_quantity < min_quantity_threshold:
+            logger.warning(
+                "Close position skipped for %s. Quantity %.8f below minimum threshold %.8f. Removing stale position.",
+                display_symbol,
+                filtered_quantity,
+                min_quantity_threshold,
+            )
+            # 古いポジションデータを削除
+            self.positions[display_symbol] = None
+            self.trade_tracker.open_trades.pop(display_symbol, None)
+            return
 
-        order = self._submit_order(exchange_symbol, side, quantity)
+        order = self._submit_order(exchange_symbol, side, filtered_quantity)
         if order:
             self.positions[display_symbol] = None
             closed = self.trade_tracker.record_close_trade(display_symbol, price)

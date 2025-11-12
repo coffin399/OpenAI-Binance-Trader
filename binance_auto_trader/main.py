@@ -784,8 +784,8 @@ class TradingBot:
                                 exit_price=None,
                                 pnl_percent=None,
                                 status="OPEN",
-                                entry_time=datetime.utcnow(),
-                                exit_time=None
+                                opened_at=datetime.utcnow(),
+                                closed_at=None
                             )
                             
                             self.trade_tracker.open_trades[symbol] = trade_record

@@ -49,7 +49,8 @@ class TradingBot:
 
         self.timeframe = getattr(config.trading, "timeframe", "1h")
         raw_quantity = float(getattr(config.trading, "quantity", 0.0))
-        self.fixed_quantity = raw_quantity if raw_quantity > 0 else None
+        # 0.0の場合はAI数量モードのためにNoneを設定せず0.0のまま保持
+        self.fixed_quantity = raw_quantity if raw_quantity > 0 else 0.0
         self.max_open_trades = parse_labeled_limit(
             getattr(config.trading, "max_open_trades", "0Trades"),
             "Trades",

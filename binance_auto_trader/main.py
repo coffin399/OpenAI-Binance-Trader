@@ -201,7 +201,7 @@ class TradingBot:
             )
             return
 
-        quantity = self._determine_quantity(price)
+        quantity = self._determine_quantity(price, decision)
         if quantity <= 0:
             logger.warning(
                 "Calculated quantity is 0 for %s at price %.4f. Check configuration.",
@@ -264,7 +264,7 @@ class TradingBot:
         if open_record and open_record.quantity:
             quantity = open_record.quantity
         else:
-            quantity = self._determine_quantity(price)
+            quantity = self._determine_quantity(price, None)
 
         if quantity <= 0:
             logger.warning(
@@ -321,13 +321,25 @@ class TradingBot:
         logger.debug("Submitting order: %s", order_details)
         return self.exchange.create_order(**order_details)
 
-    def _determine_quantity(self, last_price: float) -> float:
+    def _determine_quantity(self, last_price: float, strategy_decision: Optional[StrategyDecision] = None) -> float:
+        # AIに数量決定を任せるモード
+        if self.fixed_quantity == 0.0 and strategy_decision and hasattr(strategy_decision, 'quantity'):
+            ai_quantity = getattr(strategy_decision, 'quantity', None)
+            if ai_quantity and ai_quantity > 0:
+                logger.info("Using AI-determined quantity: %s", ai_quantity)
+                return round(ai_quantity, 6)
+        
+        # 固定数量モード
         if self.fixed_quantity and self.fixed_quantity > 0:
             return round(self.fixed_quantity, 6)
+        
+        # 投資額ベースモード
         if self.max_investment_per_trade > 0 and last_price > 0:
             quantity = self.max_investment_per_trade / last_price
             return round(quantity, 6)
-        return 0.0
+        
+        # デフォルト最小数量（エラー回避）
+        return 0.001
 
     # ------------------------------------------------------------------
     # External control (Discord commands / orchestration)

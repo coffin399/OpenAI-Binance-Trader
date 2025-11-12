@@ -13,6 +13,7 @@ class StrategyDecision:
     price: float
     confidence: float = 0.0
     info: str = ""
+    quantity: Optional[float] = None  # AIが決定した数量（オプション）
     timestamp: datetime = field(default_factory=datetime.utcnow)
 
 

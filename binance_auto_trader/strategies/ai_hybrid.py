@@ -129,6 +129,12 @@ class AIHybridStrategy(Strategy):
         info_parts.append(f"RSI: {technical_signals['rsi']:.1f}")
         info_parts.append(f"Trend: {technical_signals['trend']}")
         
+        # AIに数量を決定させる（aggressive_modeの場合）
+        ai_quantity = None
+        if self.aggressive_mode and ai_action != "HOLD":
+            ai_quantity = self._calculate_ai_quantity(price, technical_signals, context)
+            info_parts.append(f"Qty: {ai_quantity:.6f}")
+        
         return StrategyDecision(
             symbol=symbol,
             strategy=self.name,
@@ -136,6 +142,7 @@ class AIHybridStrategy(Strategy):
             price=price,
             confidence=final_confidence,
             info=" | ".join(info_parts),
+            quantity=ai_quantity,
         )
 
     def _build_prompt_context(self, df: pd.DataFrame, symbol: str) -> Dict[str, object]:
@@ -472,6 +479,52 @@ class AIHybridStrategy(Strategy):
                 return True
         
         return False
+    
+    def _calculate_ai_quantity(self, price: float, technical_signals: Dict, context: Dict) -> float:
+        """AIが市場状況に基づいて最適な数量を計算.
+        
+        Returns:
+            float: 計算された数量
+        """
+        # 基本数量（シンボルごとに調整）
+        symbol = context["symbol"]
+        if "BTC" in symbol:
+            base_quantity = 0.001  # BTC: 0.001単位
+        elif "ETH" in symbol:
+            base_quantity = 0.01   # ETH: 0.01単位
+        else:
+            base_quantity = 10.0   # DOGEなど: 10単位
+        
+        # 信頼度に基づく数量調整
+        confidence_multiplier = 1.0
+        rsi = technical_signals["rsi"]
+        volatility = technical_signals["volatility"]
+        combined_signal = technical_signals["combined_signal"]
+        
+        # RSIが極端な場合、数量を増やす
+        if rsi < 35 or rsi > 65:
+            confidence_multiplier += 0.3
+        
+        # 強いシグナルの場合、数量を増やす
+        if abs(combined_signal) > 0.5:
+            confidence_multiplier += 0.2
+        
+        # ボラティリティが高い場合、数量を少し減らす
+        if volatility > 8.0:
+            confidence_multiplier -= 0.1
+        
+        # 最終数量を計算
+        final_quantity = base_quantity * confidence_multiplier
+        
+        # 最小/最大数量の制限
+        if "BTC" in symbol:
+            final_quantity = max(0.0001, min(final_quantity, 0.01))
+        elif "ETH" in symbol:
+            final_quantity = max(0.001, min(final_quantity, 0.1))
+        else:
+            final_quantity = max(1.0, min(final_quantity, 100.0))
+        
+        return round(final_quantity, 6)
     
     @staticmethod
     def _infer_timeframe(df: pd.DataFrame) -> str:

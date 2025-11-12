@@ -62,6 +62,15 @@ class TradingBot:
             getattr(config.trading, "max_total_investment", "0JPY"),
             "JPY",
         )
+        
+        # 初期資金設定
+        self.initial_jpy = parse_currency_limit(
+            getattr(getattr(config, "initial_capital", {}), "jpy_amount", "10000JPY"),
+            "JPY",
+        )
+        self.allow_start_from_cash = getattr(
+            getattr(config, "initial_capital", {}), "allow_start_from_cash", True
+        )
         self.polling_interval = int(
             getattr(config.runtime, "polling_interval_seconds", 60)
         )
@@ -178,7 +187,7 @@ class TradingBot:
                 last_price,
             )
 
-    def _open_position(
+    def _should_open_position(
         self,
         display_symbol: str,
         exchange_symbol: str,
@@ -186,7 +195,7 @@ class TradingBot:
         side: str,
         decision: StrategyDecision,
         price: float,
-    ) -> None:
+    ) -> bool:
         open_trade_count = self.trade_tracker.get_open_trade_count()
         has_trade = self.trade_tracker.has_open_trade(display_symbol)
         if (
@@ -199,6 +208,41 @@ class TradingBot:
                 self.max_open_trades,
                 display_symbol,
             )
+            return False
+        
+        # 現金残高チェック（JPYのみからエントリー開始）
+        if self.allow_start_from_cash and open_trade_count == 0:
+            jpy_balance = self._get_jpy_balance()
+            if jpy_balance is None:
+                logger.warning("Unable to get JPY balance. Skipping entry.")
+                return False
+            if jpy_balance < 1000:  # 最低1000JPY必要
+                logger.info(
+                    "Insufficient JPY balance (%.0f). Need at least 1000 JPY to start trading.",
+                    jpy_balance
+                )
+                return False
+            logger.info("Starting from cash position. JPY balance: %.0f", jpy_balance)
+
+        return True
+
+    def _open_position(
+        self,
+        display_symbol: str,
+        exchange_symbol: str,
+        position_label: str,
+        side: str,
+        decision: StrategyDecision,
+        price: float,
+    ) -> None:
+        if not self._should_open_position(
+            display_symbol,
+            exchange_symbol,
+            position_label,
+            side,
+            decision,
+            price,
+        ):
             return
 
         quantity = self._determine_quantity(price, decision)
@@ -340,6 +384,14 @@ class TradingBot:
         
         # デフォルト最小数量（エラー回避）
         return 0.001
+    
+    def _get_jpy_balance(self) -> Optional[float]:
+        """JPY残高を取得."""
+        try:
+            return self.exchange.get_account_balance("JPY")
+        except Exception as exc:
+            logger.error("Error getting JPY balance: %s", exc)
+            return None
 
     # ------------------------------------------------------------------
     # External control (Discord commands / orchestration)

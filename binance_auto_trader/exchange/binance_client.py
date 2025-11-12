@@ -32,7 +32,7 @@ class BinanceClient:
             return Client(api_key, api_secret, testnet=True)
         return Client(api_key, api_secret)
 
-    def get_account_balance(self, asset: str = "USDT") -> Optional[float]:
+    def get_account_balance(self, asset: str = "JPY") -> Optional[float]:
         """Get account balance for a specific asset."""
         try:
             balance = self.client.get_asset_balance(asset=asset)

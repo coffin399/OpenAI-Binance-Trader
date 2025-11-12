@@ -220,8 +220,10 @@ class TradeTracker:
 
     def _get_wallet_summary(self) -> Dict[str, object]:
         """ウォレット残高サマリーを取得."""
+        import logging
+        logger = logging.getLogger(__name__)
+        
         try:
-            from binance_auto_trader.main import BinanceAutoTrader
             # グローバルインスタンスからexchangeを取得
             if hasattr(self, '_bot_instance') and self._bot_instance:
                 account = self._bot_instance.exchange.client.get_account()

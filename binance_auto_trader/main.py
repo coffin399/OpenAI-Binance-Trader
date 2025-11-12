@@ -408,6 +408,12 @@ class TradingBot:
                         price=price,
                     )
                     
+                    # Update strategy position tracking
+                    strategy_obj = self.strategies.get(display_symbol)
+                    if strategy_obj and hasattr(strategy_obj, 'update_position'):
+                        strategy_obj.update_position(display_symbol, side, price, actual_quantity)
+                        logger.debug("Updated position in strategy for %s (direct swap)", display_symbol)
+                    
                     # 確認ログ
                     if display_symbol in self.trade_tracker.open_trades:
                         record = self.trade_tracker.open_trades[display_symbol]
@@ -433,6 +439,13 @@ class TradingBot:
                 quantity=quantity,
                 price=price,
             )
+            
+            # Update strategy position tracking
+            strategy_obj = self.strategies.get(display_symbol)
+            if strategy_obj and hasattr(strategy_obj, 'update_position'):
+                strategy_obj.update_position(display_symbol, decision.action, price, quantity)
+                logger.debug("Updated position in strategy for %s", display_symbol)
+            
             logger.info(
                 "TRADE OPEN %s %s qty=%.6f price=%.4f strategy=%s",
                 display_symbol,
@@ -504,6 +517,13 @@ class TradingBot:
         if order:
             self.positions[display_symbol] = None
             closed = self.trade_tracker.record_close_trade(display_symbol, price)
+            
+            # Update strategy position tracking
+            strategy_obj = self.strategies.get(display_symbol)
+            if strategy_obj and hasattr(strategy_obj, 'update_position'):
+                strategy_obj.update_position(display_symbol, side, price, filtered_quantity)
+                logger.debug("Updated position in strategy for %s (close)", display_symbol)
+            
             logger.info(
                 "TRADE CLOSE %s %s qty=%.6f price=%.4f record=%s",
                 display_symbol,

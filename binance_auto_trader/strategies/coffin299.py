@@ -40,11 +40,17 @@ class Coffin299Strategy(Strategy):
         self.dynamic_threshold = getattr(config_section, "dynamic_threshold", True)
         self.opportunity_detection = getattr(config_section, "opportunity_detection", True)
         
+        # Position management for better sell decisions
+        self.track_positions = getattr(config_section, "track_positions", True)
+        self.take_profit_pct = getattr(config_section, "take_profit_pct", 2.0)  # 2%利益確定
+        self.stop_loss_pct = getattr(config_section, "stop_loss_pct", 1.5)  # 1.5%損切り
+        
         if not self.provider_name:
             raise ValueError("Coffin299Strategy requires 'provider' setting")
         if not self.ai_manager or not self.ai_manager.has_provider(self.provider_name):
             raise ValueError(f"AI provider '{self.provider_name}' not available")
         self._last_timestamp: Dict[str, pd.Timestamp] = {}
+        self._positions: Dict[str, Dict] = {}  # {symbol: {"entry_price": float, "quantity": float}}
 
     def evaluate(self, df: pd.DataFrame, symbol: str) -> Optional[StrategyDecision]:
         prompt_context = self._build_prompt_context(df, symbol)
@@ -108,14 +114,21 @@ class Coffin299Strategy(Strategy):
                 )
                 return None
         
+        # Check position-based sell signals (profit taking / stop loss)
+        position_action = self._check_position_exit(symbol, price, technical_signals)
+        if position_action:
+            ai_action = position_action
+            final_confidence = max(final_confidence, 0.7)  # High confidence for position exits
+            logger.info("%s: Position exit signal: %s", symbol, position_action)
+        
         # In aggressive mode, consider HOLD as potential trade opportunity
         if ai_action == "HOLD":
             if self.aggressive_mode and is_strong_opportunity:
-                # Override HOLD with technical signal direction
-                if technical_signals["combined_signal"] > 0.3:
+                # Override HOLD with technical signal direction (more balanced)
+                if technical_signals["combined_signal"] > 0.4:
                     ai_action = "BUY"
                     logger.info("%s: Overriding HOLD -> BUY (strong bullish signals)", symbol)
-                elif technical_signals["combined_signal"] < -0.3:
+                elif technical_signals["combined_signal"] < -0.4:
                     ai_action = "SELL"
                     logger.info("%s: Overriding HOLD -> SELL (strong bearish signals)", symbol)
                 else:
@@ -124,11 +137,23 @@ class Coffin299Strategy(Strategy):
                 return None
 
         price = float(df.iloc[-1]["close"])
+        
+        # Update position tracking
+        if ai_action == "BUY" and self.track_positions:
+            # Will be updated after trade execution
+            pass
+        elif ai_action == "SELL" and self.track_positions and symbol in self._positions:
+            entry_price = self._positions[symbol]["entry_price"]
+            profit_pct = ((price - entry_price) / entry_price) * 100
+            logger.info("%s: Selling position - Entry: %.4f, Current: %.4f, P/L: %+.2f%%",
+                       symbol, entry_price, price, profit_pct)
+        
         info_parts = [f"AI: {ai_action} (conf: {ai_confidence:.2f})", f"Final: {final_confidence:.2f}"]
         if ai_reasoning:
             info_parts.append(f"Reason: {ai_reasoning[:50]}")
         info_parts.append(f"RSI: {technical_signals['rsi']:.1f}")
         info_parts.append(f"Trend: {technical_signals['trend']}")
+        info_parts.append(f"Signal: {technical_signals['combined_signal']:+.2f}")
         
         # AIに数量を決定させる（aggressive_modeの場合）
         ai_quantity = None
@@ -297,16 +322,18 @@ class Coffin299Strategy(Strategy):
         slow_sma = context["slow_sma"]
         latest_price = context["latest_price"]
         
-        # RSI signals (oversold/overbought) - More aggressive thresholds
+        # RSI signals (oversold/overbought) - Optimized thresholds for balanced trading
         rsi_signal = 0.0
-        if rsi < 35:
-            rsi_signal = 1.0  # Strong buy signal
-        elif rsi < 45:
-            rsi_signal = 0.6  # Moderate buy signal
-        elif rsi > 65:
-            rsi_signal = -1.0  # Strong sell signal
-        elif rsi > 55:
-            rsi_signal = -0.6  # Moderate sell signal
+        if rsi < 30:
+            rsi_signal = 1.0  # Strong buy signal (oversold)
+        elif rsi < 40:
+            rsi_signal = 0.5  # Moderate buy signal
+        elif rsi > 70:
+            rsi_signal = -1.0  # Strong sell signal (overbought)
+        elif rsi > 60:
+            rsi_signal = -0.5  # Moderate sell signal
+        elif rsi > 50:
+            rsi_signal = -0.2  # Weak sell bias
         
         # Momentum/Trend signals
         momentum_signal = 0.0
@@ -463,25 +490,25 @@ class Coffin299Strategy(Strategy):
         # Strong buy opportunities
         if action == "BUY":
             # Oversold with volume confirmation
-            if rsi < 40 and volume_signal > 0.3:
+            if rsi < 35 and volume_signal > 0.3:
                 return True
             # Strong bullish momentum with trend alignment
-            if momentum_signal > 0.5 and trend == "bullish":
+            if momentum_signal > 0.6 and trend == "bullish":
                 return True
             # Combined strong signal
-            if combined_signal > 0.5:
+            if combined_signal > 0.6:
                 return True
         
-        # Strong sell opportunities
+        # Strong sell opportunities (strengthened)
         elif action == "SELL":
             # Overbought with volume confirmation
-            if rsi > 60 and volume_signal > 0.3:
+            if rsi > 65 and volume_signal > 0.3:
                 return True
             # Strong bearish momentum with trend alignment
-            if momentum_signal < -0.5 and trend == "bearish":
+            if momentum_signal < -0.6 and trend == "bearish":
                 return True
             # Combined strong signal
-            if combined_signal < -0.5:
+            if combined_signal < -0.6:
                 return True
         
         return False
@@ -531,6 +558,84 @@ class Coffin299Strategy(Strategy):
             final_quantity = max(10.0, min(final_quantity, 200.0))      # 10円〜200円相当
         
         return round(final_quantity, 6)
+    
+    def _check_position_exit(self, symbol: str, current_price: float, technical_signals: Dict) -> Optional[str]:
+        """Check if we should exit current position (profit taking or stop loss).
+        
+        Returns:
+            Optional[str]: "SELL" if should exit, None otherwise
+        """
+        if not self.track_positions or symbol not in self._positions:
+            return None
+        
+        position = self._positions[symbol]
+        entry_price = position["entry_price"]
+        profit_pct = ((current_price - entry_price) / entry_price) * 100
+        
+        # Take profit condition
+        if profit_pct >= self.take_profit_pct:
+            logger.info("%s: Take profit triggered at +%.2f%%", symbol, profit_pct)
+            return "SELL"
+        
+        # Stop loss condition
+        if profit_pct <= -self.stop_loss_pct:
+            logger.info("%s: Stop loss triggered at %.2f%%", symbol, profit_pct)
+            return "SELL"
+        
+        # Technical-based exit: Strong bearish signals while in profit
+        if profit_pct > 0.5 and technical_signals["combined_signal"] < -0.5:
+            logger.info("%s: Technical exit: profit %.2f%%, bearish signal %.2f",
+                       symbol, profit_pct, technical_signals["combined_signal"])
+            return "SELL"
+        
+        # RSI overbought exit while in profit
+        if profit_pct > 0.5 and technical_signals["rsi"] > 70:
+            logger.info("%s: RSI overbought exit: profit %.2f%%, RSI %.1f",
+                       symbol, profit_pct, technical_signals["rsi"])
+            return "SELL"
+        
+        return None
+    
+    def update_position(self, symbol: str, action: str, price: float, quantity: float) -> None:
+        """Update position tracking after trade execution.
+        
+        Args:
+            symbol: Trading symbol
+            action: "BUY" or "SELL"
+            price: Execution price
+            quantity: Trade quantity
+        """
+        if not self.track_positions:
+            return
+        
+        if action == "BUY":
+            if symbol in self._positions:
+                # Average down/up
+                old_qty = self._positions[symbol]["quantity"]
+                old_price = self._positions[symbol]["entry_price"]
+                new_qty = old_qty + quantity
+                new_avg_price = ((old_price * old_qty) + (price * quantity)) / new_qty
+                self._positions[symbol] = {"entry_price": new_avg_price, "quantity": new_qty}
+                logger.info("%s: Position averaged - New entry: %.4f, Qty: %.6f",
+                           symbol, new_avg_price, new_qty)
+            else:
+                self._positions[symbol] = {"entry_price": price, "quantity": quantity}
+                logger.info("%s: New position opened - Entry: %.4f, Qty: %.6f",
+                           symbol, price, quantity)
+        
+        elif action == "SELL" and symbol in self._positions:
+            old_qty = self._positions[symbol]["quantity"]
+            if quantity >= old_qty:
+                # Full exit
+                entry_price = self._positions[symbol]["entry_price"]
+                profit_pct = ((price - entry_price) / entry_price) * 100
+                logger.info("%s: Position closed - P/L: %+.2f%%", symbol, profit_pct)
+                del self._positions[symbol]
+            else:
+                # Partial exit
+                self._positions[symbol]["quantity"] -= quantity
+                logger.info("%s: Partial exit - Remaining qty: %.6f",
+                           symbol, self._positions[symbol]["quantity"])
     
     @staticmethod
     def _infer_timeframe(df: pd.DataFrame) -> str:

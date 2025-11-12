@@ -505,17 +505,20 @@ class TradingBot:
                 if "JPY" in symbol and last_price > 0:
                     required_jpy = filtered_quantity * last_price
                     jpy_balance = self._get_jpy_balance()
+                    logger.info("💰 Balance check: qty=%.6f, price=%.2f, required=%.2f JPY, available=%.2f JPY", 
+                               filtered_quantity, last_price, required_jpy, jpy_balance or 0)
+                    
                     if jpy_balance and required_jpy > jpy_balance:
                         logger.warning("AI quantity exceeds JPY balance: %.0f JPY needed, %.0f JPY available", 
                                      required_jpy, jpy_balance)
                         # 残高範囲内で数量を調整
                         affordable_quantity = (jpy_balance * 0.95) / last_price  # 5%余裕を持たせる
                         filtered_quantity = self._apply_lot_size_filter(symbol, affordable_quantity)
-                        logger.info("⚠️  ADJUSTED FOR BALANCE: %s (affordable: %.2f)", filtered_quantity, affordable_quantity)
+                        logger.info("⚠️  ADJUSTED FOR BALANCE: %s (affordable: %.6f)", filtered_quantity, affordable_quantity)
                         
                         # 調整後の必要JPYを再計算
                         required_jpy_adjusted = filtered_quantity * last_price
-                        logger.info("Required JPY after adjustment: %.0f (balance: %.0f)", required_jpy_adjusted, jpy_balance)
+                        logger.info("Required JPY after adjustment: %.2f (balance: %.2f)", required_jpy_adjusted, jpy_balance)
                 
                 return filtered_quantity
         
@@ -534,8 +537,15 @@ class TradingBot:
     def _get_jpy_balance(self) -> Optional[float]:
         """JPY残高を取得."""
         try:
+            # dry_runモードの場合は仮想ウォレットから取得
+            if self.dry_run and hasattr(self.trade_tracker, 'virtual_wallet'):
+                jpy_balance = self.trade_tracker.virtual_wallet.get("JPY", 0.0)
+                logger.info("Current JPY balance (virtual): %s", jpy_balance)
+                return jpy_balance
+            
+            # 本番モードの場合は実際のBinance残高を取得
             jpy_balance = self.exchange.get_account_balance("JPY")
-            logger.info("Current JPY balance: %s", jpy_balance)
+            logger.info("Current JPY balance (real): %s", jpy_balance)
             return jpy_balance
         except Exception as exc:
             logger.error("Error getting JPY balance: %s", exc)

@@ -76,11 +76,20 @@ class BinanceClient:
     ):
         """Create a new order."""
         try:
+            # Binance APIは数量を文字列形式で要求するため、適切にフォーマット
+            # 科学的記法を避け、末尾のゼロを削除
+            quantity_str = f"{quantity:.8f}".rstrip('0').rstrip('.')
+            
+            logging.getLogger(__name__).info(
+                "Creating order: %s %s %s (quantity: %s)", 
+                side, symbol, quantity_str, type(quantity_str)
+            )
+            
             order = self.client.create_order(
                 symbol=symbol,
                 side=side,
                 type=order_type,
-                quantity=quantity,
+                quantity=quantity_str,
                 **kwargs,
             )
             logging.getLogger(__name__).info("Order created: %s", order)

@@ -228,14 +228,15 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
         <p class=\"subtitle\">Live trading telemetry. Mode: <span id=\"mode-pill\" class=\"pill\"></span></p>
       </header>
 
-      <section class=\"card\" style=\"margin-bottom: 24px;\" id=\"wallet-section\">
-        <div class=\"section-title\">💰 Wallet Balance</div>
-        <div style=\"display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;\">
+      <section class="card" style="margin-bottom: 24px;" id="wallet-section">
+        <div class="section-title">💰 Wallet Balance</div>
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;">
           <div>
-            <div style=\"font-size: 1.8rem; font-weight: 600; color: #34d399;\" id=\"total-jpy-value\">0 JPY</div>
-            <div style=\"color: #94a3b8; font-size: 0.85rem; margin-top: 4px;\">Total Value (JPY)</div>
+            <div style="font-size: 1.8rem; font-weight: 600; color: #34d399;" id="total-jpy-value">0 JPY</div>
+            <div style="color: #94a3b8; font-size: 0.85rem; margin-top: 4px;">Total Value (JPY)</div>
+            <div style="color: #60a5fa; font-size: 1.1rem; margin-top: 8px; font-weight: 500;" id="current-jpy-balance">JPY: 0</div>
           </div>
-          <div style=\"display: flex; gap: 12px; flex-wrap: wrap;\" id=\"wallet-assets\"></div>
+          <div style="display: flex; gap: 12px; flex-wrap: wrap;" id="wallet-assets"></div>
         </div>
       </section>
 
@@ -380,12 +381,25 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
       function renderWallet(wallet) {
         const totalEl = document.getElementById('total-jpy-value');
         const assetsEl = document.getElementById('wallet-assets');
+        const jpyBalanceEl = document.getElementById('current-jpy-balance');
         
         if (!totalEl || !assetsEl) return;
         
         // 総額表示
         const totalJpy = wallet.total_jpy_value || 0;
         totalEl.textContent = `${formatNumber(totalJpy, { precision: 0 })} JPY`;
+        
+        // 現在のJPY残高を表示
+        let currentJpy = 0;
+        if (wallet.assets && wallet.assets.length > 0) {
+          const jpyAsset = wallet.assets.find(asset => asset.asset === 'JPY');
+          if (jpyAsset) {
+            currentJpy = jpyAsset.quantity || 0;
+          }
+        }
+        if (jpyBalanceEl) {
+          jpyBalanceEl.textContent = `💴 JPY: ${formatNumber(currentJpy, { precision: 0 })}`;
+        }
         
         // 資産リスト表示
         assetsEl.innerHTML = '';

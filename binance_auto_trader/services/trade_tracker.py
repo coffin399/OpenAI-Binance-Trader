@@ -46,6 +46,18 @@ class TradeTracker:
         self.price_history_limit = 500
         self.symbol_palette: Dict[str, str] = {}
         self._palette_index = 0
+        
+        # dry_run用の仮想ウォレット
+        self.virtual_wallet: Dict[str, float] = {}
+        if self.dry_run:
+            # 初期資金を設定
+            initial_jpy = getattr(getattr(config, "initial_capital", {}), "jpy_amount", 10000)
+            if isinstance(initial_jpy, str):
+                # "10000JPY" のような文字列から数値を抽出
+                import re
+                match = re.search(r'(\d+(?:\.\d+)?)', str(initial_jpy))
+                initial_jpy = float(match.group(1)) if match else 10000.0
+            self.virtual_wallet["JPY"] = float(initial_jpy)
 
     # ------------------------------------------------------------------
     # Recording helpers
@@ -84,6 +96,10 @@ class TradeTracker:
         with self._lock:
             self.open_trades[symbol] = record
             self._ensure_color(symbol)
+            
+            # dry_runモード時は仮想ウォレットを更新
+            if self.dry_run:
+                self._update_virtual_wallet_on_open(symbol, action, quantity, price)
 
     def record_close_trade(
         self,
@@ -106,6 +122,11 @@ class TradeTracker:
             if record.quantity is None:
                 record.quantity = 0.0
             self.closed_trades.append(record)
+            
+            # dry_runモード時は仮想ウォレットを更新
+            if self.dry_run:
+                self._update_virtual_wallet_on_close(symbol, record.action, record.quantity, price)
+            
             return record
 
     def set_backtest_results(self, results: Iterable[BacktestResult]) -> None:
@@ -137,6 +158,71 @@ class TradeTracker:
             quantity = float(trade.quantity) if trade.quantity is not None else 0.0
             entry_price = float(trade.entry_price) if trade.entry_price is not None else 0.0
             return abs(quantity) * entry_price
+
+    # ------------------------------------------------------------------
+    # Virtual Wallet helpers (for dry_run mode)
+    # ------------------------------------------------------------------
+    def _update_virtual_wallet_on_open(self, symbol: str, action: str, quantity: float, price: float) -> None:
+        """BUY/SELL時に仮想ウォレットを更新."""
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        # シンボルから資産名を抽出 (例: "BTC/JPY" -> "BTC")
+        asset = symbol.split("/")[0] if "/" in symbol else symbol.replace("JPY", "")
+        total_cost = quantity * price
+        
+        if action.upper() == "BUY":
+            # BUY: JPYを減らして資産を増やす
+            current_jpy = self.virtual_wallet.get("JPY", 0.0)
+            if current_jpy >= total_cost:
+                self.virtual_wallet["JPY"] = current_jpy - total_cost
+                self.virtual_wallet[asset] = self.virtual_wallet.get(asset, 0.0) + quantity
+                logger.info("[Virtual Wallet] BUY %s: JPY %.0f -> %.0f | %s %.6f -> %.6f", 
+                           symbol, current_jpy, self.virtual_wallet["JPY"], 
+                           asset, self.virtual_wallet.get(asset, 0.0) - quantity, self.virtual_wallet[asset])
+            else:
+                logger.warning("[Virtual Wallet] Insufficient JPY for BUY: need %.0f, have %.0f", total_cost, current_jpy)
+        
+        elif action.upper() == "SELL":
+            # SELL: 資産を減らしてJPYを増やす
+            current_asset = self.virtual_wallet.get(asset, 0.0)
+            if current_asset >= quantity:
+                self.virtual_wallet[asset] = current_asset - quantity
+                self.virtual_wallet["JPY"] = self.virtual_wallet.get("JPY", 0.0) + total_cost
+                logger.info("[Virtual Wallet] SELL %s: %s %.6f -> %.6f | JPY %.0f -> %.0f", 
+                           symbol, asset, current_asset, self.virtual_wallet[asset],
+                           self.virtual_wallet["JPY"] - total_cost, self.virtual_wallet["JPY"])
+            else:
+                logger.warning("[Virtual Wallet] Insufficient %s for SELL: need %.6f, have %.6f", asset, quantity, current_asset)
+    
+    def _update_virtual_wallet_on_close(self, symbol: str, action: str, quantity: float, price: float) -> None:
+        """ポジションクローズ時に仮想ウォレットを更新."""
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        # シンボルから資産名を抽出
+        asset = symbol.split("/")[0] if "/" in symbol else symbol.replace("JPY", "")
+        total_value = quantity * price
+        
+        if action.upper() == "BUY":
+            # LONG クローズ (SELL): 資産を売ってJPYを得る
+            current_asset = self.virtual_wallet.get(asset, 0.0)
+            if current_asset >= quantity:
+                self.virtual_wallet[asset] = current_asset - quantity
+                self.virtual_wallet["JPY"] = self.virtual_wallet.get("JPY", 0.0) + total_value
+                logger.info("[Virtual Wallet] CLOSE LONG %s: %s %.6f -> %.6f | JPY %.0f -> %.0f", 
+                           symbol, asset, current_asset, self.virtual_wallet[asset],
+                           self.virtual_wallet["JPY"] - total_value, self.virtual_wallet["JPY"])
+        
+        elif action.upper() == "SELL":
+            # SHORT クローズ (BUY): JPYを使って資産を買い戻す
+            current_jpy = self.virtual_wallet.get("JPY", 0.0)
+            if current_jpy >= total_value:
+                self.virtual_wallet["JPY"] = current_jpy - total_value
+                self.virtual_wallet[asset] = self.virtual_wallet.get(asset, 0.0) + quantity
+                logger.info("[Virtual Wallet] CLOSE SHORT %s: JPY %.0f -> %.0f | %s %.6f -> %.6f", 
+                           symbol, current_jpy, self.virtual_wallet["JPY"],
+                           asset, self.virtual_wallet.get(asset, 0.0) - quantity, self.virtual_wallet[asset])
 
     # ------------------------------------------------------------------
     # Palette helpers
@@ -223,6 +309,55 @@ class TradeTracker:
         import logging
         logger = logging.getLogger(__name__)
         
+        # dry_runモードの場合は仮想ウォレットを使用
+        if self.dry_run:
+            wallet_summary = {
+                "total_jpy_value": 0.0,
+                "assets": []
+            }
+            
+            with self._lock:
+                for asset, quantity in self.virtual_wallet.items():
+                    if quantity > 0:
+                        if asset == 'JPY':
+                            jpy_value = quantity
+                            price = 1.0
+                        else:
+                            # 現在価格を取得してJPY換算
+                            try:
+                                if hasattr(self, '_bot_instance') and self._bot_instance:
+                                    symbol = None
+                                    for display_symbol in self.symbol_order:
+                                        if asset in display_symbol:
+                                            symbol = display_symbol.replace("/", "")
+                                            break
+                                    
+                                    if symbol:
+                                        ticker = self._bot_instance.exchange.client.get_symbol_ticker(symbol=symbol)
+                                        price = float(ticker['price'])
+                                        jpy_value = quantity * price
+                                    else:
+                                        price = 0.0
+                                        jpy_value = 0.0
+                                else:
+                                    price = 0.0
+                                    jpy_value = 0.0
+                            except Exception:
+                                price = 0.0
+                                jpy_value = 0.0
+                        
+                        wallet_summary["assets"].append({
+                            "asset": asset,
+                            "quantity": quantity,
+                            "price": price,
+                            "jpy_value": jpy_value
+                        })
+                        
+                        wallet_summary["total_jpy_value"] += jpy_value
+            
+            return wallet_summary
+        
+        # 本番モードの場合は実際のBinance残高を取得
         try:
             # グローバルインスタンスからexchangeを取得
             if hasattr(self, '_bot_instance') and self._bot_instance:

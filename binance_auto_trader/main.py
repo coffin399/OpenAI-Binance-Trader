@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import threading
 import time
 from datetime import datetime
@@ -14,7 +15,7 @@ from binance_auto_trader.services.backtester import Backtester
 from binance_auto_trader.services.trade_tracker import TradeTracker
 from binance_auto_trader.strategies import build_strategy
 from binance_auto_trader.strategies.base import Strategy
-from binance_auto_trader.utils.discord_notify import DiscordNotifier
+from binance_auto_trader.utils.discord_notify import DiscordNotifier, WalletDiscordNotifier
 from binance_auto_trader.utils.helpers import (
     normalize_symbol,
     parse_currency_limit,
@@ -39,6 +40,7 @@ class TradingBot:
         self.trade_tracker = TradeTracker(config)
         self.trade_tracker._bot_instance = self  # ウォレット情報取得用
         self.notifier = DiscordNotifier(config)
+        self.wallet_notifier = WalletDiscordNotifier(config)  # ウォレット通知用
 
         symbol_list = getattr(config.trading, "symbols", None)
         if not symbol_list:
@@ -94,6 +96,13 @@ class TradingBot:
         self.strategies = self._initialize_strategies(strategies)
 
         self.positions: Dict[str, Optional[str]] = {symbol: None for symbol in self.symbols_display}
+        self._symbol_info_cache: Dict[str, Dict[str, object]] = {}
+        
+        # ウォレット通知用
+        self._last_wallet_notification = time.time()
+        self._last_wallet_value = 0.0  # 前回のウォレット価値
+        self._initial_wallet_value = 0.0  # 初期ウォレット価値
+        self._wallet_notification_interval = 3600  # 1時間（秒）
 
         # 起動時にオープンポジションを検知して復元
         if not self.dry_run:
@@ -150,6 +159,9 @@ class TradingBot:
         if current_time - self._last_balance_check > 60:  # 60秒ごと
             self._debug_account_balances()
             self._last_balance_check = current_time
+        
+        # ウォレット通知（1時間ごと）
+        self._notify_wallet_summary()
         
         for display_symbol, exchange_symbol in self.symbol_map.items():
             klines = self.exchange.get_historical_klines(
@@ -520,6 +532,58 @@ class TradingBot:
         except Exception as exc:
             logger.error("Error getting account balances: %s", exc)
     
+    def _notify_wallet_summary(self) -> None:
+        """1時間ごとにウォレットサマリーを通知."""
+        try:
+            current_time = time.time()
+            
+            # 通知間隔をチェック
+            if current_time - self._last_wallet_notification < self._wallet_notification_interval:
+                return
+            
+            # ウォレット情報を取得
+            wallet_summary = self.trade_tracker._get_wallet_summary()
+            current_total = wallet_summary.get("total_jpy_value", 0.0)
+            assets = wallet_summary.get("assets", [])
+            
+            # 初回起動時の値を記録
+            if self._initial_wallet_value == 0.0:
+                self._initial_wallet_value = current_total
+                self._last_wallet_value = current_total
+                self._last_wallet_notification = current_time
+                
+                # 初回通知
+                self.wallet_notifier.notify_wallet_summary(
+                    total_jpy=current_total,
+                    assets=assets,
+                    hourly_change=0.0,
+                    total_change=0.0
+                )
+                logger.info("Initial wallet summary sent: %.0f JPY", current_total)
+                return
+            
+            # 変化額を計算
+            hourly_change = current_total - self._last_wallet_value
+            total_change = current_total - self._initial_wallet_value
+            
+            # ウォレット通知を送信
+            self.wallet_notifier.notify_wallet_summary(
+                total_jpy=current_total,
+                assets=assets,
+                hourly_change=hourly_change,
+                total_change=total_change
+            )
+            
+            # 状態を更新
+            self._last_wallet_value = current_total
+            self._last_wallet_notification = current_time
+            
+            logger.info("Wallet summary sent: %.0f JPY (1H: %+.0f, Total: %+.0f)", 
+                       current_total, hourly_change, total_change)
+            
+        except Exception as exc:
+            logger.error("Error sending wallet summary: %s", exc)
+    
     def _get_available_jpy_from_assets(self) -> float:
         """保有資産を売却して得られるJPY額を計算."""
         try:
@@ -643,28 +707,45 @@ class TradingBot:
     def _can_direct_swap(self, target_symbol: str) -> bool:
         """指定されたシンボルに直接交換できるか判定."""
         try:
-            # ターゲットの資産名を取得
             target_asset = target_symbol.replace("JPY", "")
-            
-            # 保有資産を取得
             account = self.exchange.client.get_account()
-            
-            for balance in account['balances']:
-                asset = balance['asset']
-                free_qty = float(balance['free'])
-                
-                if asset != 'JPY' and free_qty > 0:
-                    # 交換ペアをチェック
+
+            for balance in account["balances"]:
+                asset = balance["asset"]
+                free_qty = float(balance["free"])
+
+                if asset != "JPY" and free_qty > 0:
                     swap_pair = f"{asset}/{target_asset}"
                     reverse_pair = f"{target_asset}/{asset}"
-                    
+
                     if swap_pair in self.swap_pairs or reverse_pair in self.swap_pairs:
-                        logger.info("Found direct swap pair: %s (asset: %s, qty: %s)", 
-                                   swap_pair, asset, free_qty)
+                        sell_symbol = f"{asset}JPY"
+                        buy_symbol = target_symbol
+
+                        if not self._symbol_exists(sell_symbol):
+                            logger.debug(
+                                "Direct swap skipped: sell symbol %s not available on exchange",
+                                sell_symbol,
+                            )
+                            continue
+
+                        if not self._symbol_exists(buy_symbol):
+                            logger.debug(
+                                "Direct swap skipped: buy symbol %s not available on exchange",
+                                buy_symbol,
+                            )
+                            continue
+
+                        logger.info(
+                            "Found direct swap pair: %s (asset: %s, qty: %s)",
+                            swap_pair,
+                            asset,
+                            free_qty,
+                        )
                         return True
-            
+
             return False
-            
+
         except Exception as exc:
             logger.error("Error checking direct swap availability: %s", exc)
             return False
@@ -700,39 +781,34 @@ class TradingBot:
                         
                         # LOT_SIZEフィルターを適用
                         sell_quantity = self._apply_lot_size_filter(sell_symbol, sell_quantity)
-                        
+
                         # NOTIONALフィルター対応：最小取引金額チェック
-                        try:
-                            if "BTC" in sell_symbol:
-                                # BTCペアはUSDT建てで価格取得
-                                usdt_symbol = sell_symbol.replace("JPY", "USDT")
-                                ticker = self.exchange.client.get_symbol_ticker(symbol=usdt_symbol)
-                                usdt_price = float(ticker['price'])
-                                # USDTをJPYに変換（仮に1USDT=150JPY）
-                                estimated_jpy_value = sell_quantity * usdt_price * 150
-                            else:
-                                # JPYペアは直接JPY価格
-                                ticker = self.exchange.client.get_symbol_ticker(symbol=sell_symbol)
-                                current_price = float(ticker['price'])
-                                estimated_jpy_value = sell_quantity * current_price
-                            
-                            # Binanceの最小取引金額（ETH/BTCは約5USDT≈750JPY相当）
-                            if "BTC" in sell_symbol:
-                                min_notional_jpy = 750.0  # BTCペアは低め
-                            else:
-                                min_notional_jpy = 1000.0  # その他は1000JPY
-                            
-                            if estimated_jpy_value < min_notional_jpy:
-                                logger.warning("Direct swap amount too small: %.0f JPY < %.0f JPY (NOTIONAL filter)", 
-                                             estimated_jpy_value, min_notional_jpy)
-                                continue
-                        except Exception as exc:
-                            logger.warning("Could not verify NOTIONAL filter for %s: %s", sell_symbol, exc)
-                            # 続行するが、エラーになる可能性がある
-                        
+                        min_notional = self._get_min_notional(sell_symbol)
+                        estimated_jpy_value = self._estimate_jpy_value(sell_symbol, sell_quantity)
+
+                        if estimated_jpy_value is None:
+                            logger.warning(
+                                "Could not estimate notional for %s, skipping direct swap",
+                                sell_symbol,
+                            )
+                            continue
+
+                        if estimated_jpy_value < min_notional:
+                            logger.warning(
+                                "Direct swap amount too small: %.0f JPY < %.0f JPY (NOTIONAL filter)",
+                                estimated_jpy_value,
+                                min_notional,
+                            )
+                            continue
+
                         # 売却実行
-                        logger.info("Executing direct swap: %s -> %s (qty: %s, value: %.0f JPY)", 
-                                   asset, target_asset, sell_quantity, estimated_jpy_value)
+                        logger.info(
+                            "Executing direct swap: %s -> %s (qty: %s, value: %.0f JPY)",
+                            asset,
+                            target_asset,
+                            sell_quantity,
+                            estimated_jpy_value,
+                        )
                         
                         # まずassetをJPYに売却
                         sell_order = self.exchange.create_order(
@@ -870,44 +946,93 @@ class TradingBot:
     def _apply_lot_size_filter(self, symbol: str, quantity: float) -> float:
         """BinanceのLOT_SIZEフィルターを適用して数量を調整."""
         try:
-            # シンボル情報を取得
             exchange_symbol = symbol.replace("/", "")
-            symbol_info = None
-            
-            # スポット取引のシンボル情報を取得
-            for s in self.exchange.client.get_exchange_info()['symbols']:
-                if s['symbol'] == exchange_symbol:
-                    symbol_info = s
-                    break
-            
+            symbol_info = self._get_symbol_info(exchange_symbol)
+
             if symbol_info:
-                # LOT_SIZEフィルターを取得
-                for filter_item in symbol_info['filters']:
-                    if filter_item['filterType'] == 'LOT_SIZE':
-                        min_qty = float(filter_item['minQty'])
-                        max_qty = float(filter_item['maxQty'])
-                        step_size = float(filter_item['stepSize'])
-                        
-                        # ステップサイズに合わせて調整
-                        adjusted_quantity = (quantity // step_size) * step_size
-                        
-                        # 最小/最大数量チェック
-                        if adjusted_quantity < min_qty:
-                            adjusted_quantity = min_qty
-                        elif adjusted_quantity > max_qty:
-                            adjusted_quantity = max_qty
-                        
-                        logger.debug("Applied LOT_SIZE filter for %s: %s -> %s (min: %s, max: %s, step: %s)", 
-                                   symbol, quantity, adjusted_quantity, min_qty, max_qty, step_size)
-                        return round(adjusted_quantity, 8)
-            
-            # フィルター情報が取得できない場合は丸めるのみ
+                lot_filter = self._get_filter(symbol_info, "LOT_SIZE")
+                if lot_filter:
+                    min_qty = float(lot_filter["minQty"])
+                    max_qty = float(lot_filter["maxQty"])
+                    step_size = float(lot_filter["stepSize"])
+
+                    if step_size <= 0:
+                        logger.warning("Invalid step size for %s: %s", symbol, step_size)
+                        return round(quantity, 8)
+
+                    steps = math.floor(quantity / step_size)
+                    adjusted_quantity = steps * step_size
+
+                    if adjusted_quantity < min_qty:
+                        adjusted_quantity = min_qty
+                    elif adjusted_quantity > max_qty:
+                        adjusted_quantity = max_qty
+
+                    logger.debug(
+                        "Applied LOT_SIZE filter for %s: %s -> %s (min: %s, max: %s, step: %s)",
+                        symbol,
+                        quantity,
+                        adjusted_quantity,
+                        min_qty,
+                        max_qty,
+                        step_size,
+                    )
+                    return round(adjusted_quantity, 8)
+
             logger.warning("Could not get LOT_SIZE filter for %s, using rounded quantity", symbol)
             return round(quantity, 8)
-            
+
         except Exception as exc:
             logger.warning("Error applying LOT_SIZE filter for %s: %s", symbol, exc)
             return round(quantity, 8)
+
+    def _get_symbol_info(self, exchange_symbol: str) -> Optional[Dict[str, object]]:
+        """Binanceのシンボル情報をキャッシュ付きで取得."""
+        if exchange_symbol in self._symbol_info_cache:
+            return self._symbol_info_cache[exchange_symbol]
+
+        try:
+            exchange_info = self.exchange.client.get_exchange_info()
+            for info in exchange_info.get("symbols", []):
+                self._symbol_info_cache[info["symbol"]] = info
+            return self._symbol_info_cache.get(exchange_symbol)
+        except Exception as exc:
+            logger.warning("Could not fetch exchange info for %s: %s", exchange_symbol, exc)
+            return None
+
+    @staticmethod
+    def _get_filter(symbol_info: Dict[str, object], filter_type: str) -> Optional[Dict[str, object]]:
+        for filter_item in symbol_info.get("filters", []):
+            if filter_item.get("filterType") == filter_type:
+                return filter_item
+        return None
+
+    def _get_min_notional(self, symbol: str) -> float:
+        """MIN_NOTIONALフィルタから最小取引金額を取得."""
+        exchange_symbol = symbol.replace("/", "")
+        symbol_info = self._get_symbol_info(exchange_symbol)
+        if not symbol_info:
+            return 1000.0
+
+        notional_filter = self._get_filter(symbol_info, "MIN_NOTIONAL")
+        if notional_filter:
+            try:
+                return float(notional_filter.get("minNotional", 1000.0))
+            except (TypeError, ValueError):
+                pass
+
+        return 1000.0
+
+    def _estimate_jpy_value(self, symbol: str, quantity: float) -> Optional[float]:
+        """数量をJPY換算した概算値を計算."""
+        exchange_symbol = symbol.replace("/", "")
+        try:
+            ticker = self.exchange.client.get_symbol_ticker(symbol=exchange_symbol)
+            price = float(ticker["price"])
+            return quantity * price
+        except Exception as exc:
+            logger.warning("Could not estimate JPY value for %s: %s", symbol, exc)
+            return None
     
     def _restore_open_positions(self) -> None:
         """Binanceからオープンポジションを検知してtrade_trackerに復元."""

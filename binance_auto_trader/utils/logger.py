@@ -3,14 +3,13 @@ from __future__ import annotations
 import atexit
 import logging
 import queue
-import sys
 import threading
 import time
-from collections import deque
 from pathlib import Path
-from typing import Iterable, List, Optional
+from typing import List, Optional
 
 import requests
+from binance_auto_trader.utils.discord_notify import TradeOnlyFilter
 
 from binance_auto_trader.config.config import Config
 
@@ -165,6 +164,7 @@ def setup_logging(config: Config) -> None:
                 ansi_wrap=ansi_wrap,
             )
             discord_handler.setFormatter(formatter)
+            discord_handler.addFilter(TradeOnlyFilter())  # 取引ログのみを通すフィルタ
             root_logger.addHandler(discord_handler)
 
             atexit.register(discord_handler.close)

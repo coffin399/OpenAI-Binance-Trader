@@ -94,7 +94,8 @@ asset_management:
 discord:
   enabled: false
   bot_token: ""
-  channel_ids: []
+  channel_ids: []  # 取引通知用チャンネルID
+  wallet_channel_ids: []  # ウォレット通知用チャンネルID（別チャンネルに送信する場合）
   rate_limit:
     max_messages: 15
     per_seconds: 5

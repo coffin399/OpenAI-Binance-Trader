@@ -271,6 +271,7 @@ class TradeTracker:
                 
                 return wallet_summary
             else:
+                logger.warning("Wallet summary unavailable: bot instance not attached to TradeTracker")
                 return {"total_jpy_value": 0.0, "assets": []}
         except Exception as exc:
             logger.warning("Error getting wallet summary: %s", exc)

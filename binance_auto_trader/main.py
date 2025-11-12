@@ -369,31 +369,28 @@ class TradingBot:
         return self.exchange.create_order(**order_details)
 
     def _determine_quantity(self, last_price: float, strategy_decision: Optional[StrategyDecision] = None) -> float:
-        logger.debug("Determining quantity - fixed_quantity: %s, strategy_decision: %s", 
-                    self.fixed_quantity, strategy_decision is not None)
+        logger.info("CONFIG CHECK - fixed_quantity: %s, max_investment: %s, strategy_decision: %s", 
+                   self.fixed_quantity, self.max_investment_per_trade, strategy_decision is not None)
         
-        # AIに数量決定を任せるモード（最優先）
+        # AI数量を絶対優先（fixed_quantityが0.0の場合）
         if self.fixed_quantity == 0.0 and strategy_decision and hasattr(strategy_decision, 'quantity'):
             ai_quantity = getattr(strategy_decision, 'quantity', None)
-            logger.debug("AI quantity check - ai_quantity: %s, ai_quantity > 0: %s", 
-                        ai_quantity, ai_quantity and ai_quantity > 0)
+            logger.info("AI QUANTITY PRIORITY - ai_quantity: %s, ai_quantity > 0: %s", 
+                       ai_quantity, ai_quantity and ai_quantity > 0)
             if ai_quantity and ai_quantity > 0:
-                logger.info("Using AI-determined quantity: %s", ai_quantity)
-                return self._apply_lot_size_filter(strategy_decision.symbol if strategy_decision else "BTC/JPY", ai_quantity)
+                filtered_quantity = self._apply_lot_size_filter(strategy_decision.symbol if strategy_decision else "BTC/JPY", ai_quantity)
+                logger.info("✅ USING AI QUANTITY: %s -> %s", ai_quantity, filtered_quantity)
+                return filtered_quantity
         
-        # 固定数量モード
-        if self.fixed_quantity and self.fixed_quantity > 0:
-            logger.info("Using fixed quantity: %s", self.fixed_quantity)
-            return self._apply_lot_size_filter("BTC/JPY", self.fixed_quantity)
-        
-        # 投資額ベースモード
+        # ここには到達しないはず（AI数量優先のため）
+        logger.warning("⚠️  FALLBACK - Using investment-based (AI quantity failed)")
         if self.max_investment_per_trade > 0 and last_price > 0:
             quantity = self.max_investment_per_trade / last_price
             logger.info("Using investment-based quantity: %s (JPY: %s / price: %s)", 
                        quantity, self.max_investment_per_trade, last_price)
             return self._apply_lot_size_filter("BTC/JPY", quantity)
         
-        # デフォルト最小数量（エラー回避）
+        # 最終フォールバック
         logger.warning("Using default minimum quantity 0.001 - no valid quantity method found")
         return self._apply_lot_size_filter("BTC/JPY", 0.001)
     

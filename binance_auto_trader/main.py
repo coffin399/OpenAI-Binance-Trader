@@ -37,6 +37,7 @@ class TradingBot:
 
         self.ai_manager = AIProviderManager(getattr(config, "ai", None))
         self.trade_tracker = TradeTracker(config)
+        self.trade_tracker._bot_instance = self  # ウォレット情報取得用
         self.notifier = DiscordNotifier(config)
 
         symbol_list = getattr(config.trading, "symbols", None)
@@ -140,6 +141,16 @@ class TradingBot:
             time.sleep(sleep_for)
 
     def _process_cycle(self) -> None:
+        # デバッグ：定期的に残高確認（1分に1回程度）
+        import time
+        current_time = time.time()
+        if not hasattr(self, '_last_balance_check'):
+            self._last_balance_check = 0
+        
+        if current_time - self._last_balance_check > 60:  # 60秒ごと
+            self._debug_account_balances()
+            self._last_balance_check = current_time
+        
         for display_symbol, exchange_symbol in self.symbol_map.items():
             klines = self.exchange.get_historical_klines(
                 symbol=exchange_symbol,
@@ -483,10 +494,31 @@ class TradingBot:
     def _get_jpy_balance(self) -> Optional[float]:
         """JPY残高を取得."""
         try:
-            return self.exchange.get_account_balance("JPY")
+            jpy_balance = self.exchange.get_account_balance("JPY")
+            logger.info("Current JPY balance: %s", jpy_balance)
+            return jpy_balance
         except Exception as exc:
             logger.error("Error getting JPY balance: %s", exc)
             return None
+    
+    def _debug_account_balances(self) -> None:
+        """デバッグ用：全資産残高を表示."""
+        try:
+            account = self.exchange.client.get_account()
+            logger.info("=== Account Balances ===")
+            
+            for balance in account['balances']:
+                asset = balance['asset']
+                free = float(balance['free'])
+                locked = float(balance['locked'])
+                
+                if free > 0 or locked > 0:
+                    logger.info("Asset: %s | Free: %s | Locked: %s", asset, free, locked)
+            
+            logger.info("========================")
+            
+        except Exception as exc:
+            logger.error("Error getting account balances: %s", exc)
     
     def _get_available_jpy_from_assets(self) -> float:
         """保有資産を売却して得られるJPY額を計算."""

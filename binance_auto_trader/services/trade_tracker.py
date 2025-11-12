@@ -214,8 +214,65 @@ class TradeTracker:
             "recent_closed_trades": recent_closed,
             "symbols": self._build_symbol_summaries(),
             "swap_pairs": self.swap_pairs,
+            "wallet": self._get_wallet_summary(),
         })
         return summary
+
+    def _get_wallet_summary(self) -> Dict[str, object]:
+        """ウォレット残高サマリーを取得."""
+        try:
+            from binance_auto_trader.main import BinanceAutoTrader
+            # グローバルインスタンスからexchangeを取得
+            if hasattr(self, '_bot_instance') and self._bot_instance:
+                account = self._bot_instance.exchange.client.get_account()
+                wallet_summary = {
+                    "total_jpy_value": 0.0,
+                    "assets": []
+                }
+                
+                for balance in account['balances']:
+                    asset = balance['asset']
+                    free_qty = float(balance['free'])
+                    
+                    if free_qty > 0:
+                        if asset == 'JPY':
+                            jpy_value = free_qty
+                            price = 1.0
+                        else:
+                            # 現在価格を取得してJPY換算
+                            try:
+                                symbol = None
+                                for display_symbol in self.symbol_order:
+                                    if asset in display_symbol:
+                                        symbol = display_symbol.replace("/", "")
+                                        break
+                                
+                                if symbol:
+                                    ticker = self._bot_instance.exchange.client.get_symbol_ticker(symbol=symbol)
+                                    price = float(ticker['price'])
+                                    jpy_value = free_qty * price
+                                else:
+                                    price = 0.0
+                                    jpy_value = 0.0
+                            except Exception:
+                                price = 0.0
+                                jpy_value = 0.0
+                        
+                        wallet_summary["assets"].append({
+                            "asset": asset,
+                            "quantity": free_qty,
+                            "price": price,
+                            "jpy_value": jpy_value
+                        })
+                        
+                        wallet_summary["total_jpy_value"] += jpy_value
+                
+                return wallet_summary
+            else:
+                return {"total_jpy_value": 0.0, "assets": []}
+        except Exception as exc:
+            logger.warning("Error getting wallet summary: %s", exc)
+            return {"total_jpy_value": 0.0, "assets": []}
 
     def get_price_history_payload(self) -> Dict[str, object]:
         with self._lock:

@@ -228,6 +228,17 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
         <p class=\"subtitle\">Live trading telemetry. Mode: <span id=\"mode-pill\" class=\"pill\"></span></p>
       </header>
 
+      <section class=\"card\" style=\"margin-bottom: 24px;\" id=\"wallet-section\">
+        <div class=\"section-title\">💰 Wallet Balance</div>
+        <div style=\"display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;\">
+          <div>
+            <div style=\"font-size: 1.8rem; font-weight: 600; color: #34d399;\" id=\"total-jpy-value\">0 JPY</div>
+            <div style=\"color: #94a3b8; font-size: 0.85rem; margin-top: 4px;\">Total Value (JPY)</div>
+          </div>
+          <div style=\"display: flex; gap: 12px; flex-wrap: wrap;\" id=\"wallet-assets\"></div>
+        </div>
+      </section>
+
       <section class=\"symbol-strip\" id=\"symbol-strip\"></section>
 
       <section class=\"card\" style=\"margin-bottom: 32px;\" id=\"swap-pairs-section\">
@@ -364,6 +375,51 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
             options: chartOptions,
           });
         }
+      }
+
+      function renderWallet(wallet) {
+        const totalEl = document.getElementById('total-jpy-value');
+        const assetsEl = document.getElementById('wallet-assets');
+        
+        if (!totalEl || !assetsEl) return;
+        
+        // 総額表示
+        const totalJpy = wallet.total_jpy_value || 0;
+        totalEl.textContent = `${formatNumber(totalJpy, { precision: 0 })} JPY`;
+        
+        // 資産リスト表示
+        assetsEl.innerHTML = '';
+        
+        if (!wallet.assets || !wallet.assets.length) {
+          assetsEl.innerHTML = '<div style="color: #94a3b8; font-size: 0.85rem;">No assets</div>';
+          return;
+        }
+        
+        // JPY以外の資産を表示（JPYは総額に含まれているため）
+        const nonJpyAssets = wallet.assets.filter(asset => asset.asset !== 'JPY');
+        
+        if (nonJpyAssets.length === 0) {
+          assetsEl.innerHTML = '<div style="color: #94a3b8; font-size: 0.85rem;">Only JPY</div>';
+          return;
+        }
+        
+        nonJpyAssets.forEach((asset) => {
+          const assetPill = document.createElement('div');
+          assetPill.className = 'pill';
+          assetPill.style.background = 'rgba(34,197,94,0.15)';
+          assetPill.style.border = '1px solid rgba(34,197,94,0.3)';
+          assetPill.style.fontSize = '0.8rem';
+          
+          const quantity = formatNumber(asset.quantity, { precision: 6 });
+          const jpyValue = formatNumber(asset.jpy_value, { precision: 0 });
+          
+          assetPill.innerHTML = `
+            <div style="font-weight: 600;">${asset.asset}</div>
+            <div style="font-size: 0.75rem; color: #94a3b8;">${quantity} (${jpyValue} JPY)</div>
+          `;
+          
+          assetsEl.appendChild(assetPill);
+        });
       }
 
       function renderSwapPairs(swapPairs) {
@@ -545,6 +601,7 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
 
           renderSymbolStrip(summary.symbols || []);
           renderSwapPairs(summary.swap_pairs || []);
+          renderWallet(summary.wallet || {});
 
           const modeEl = document.getElementById('mode-pill');
           modeEl.textContent = summary.mode;

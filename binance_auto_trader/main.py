@@ -644,6 +644,9 @@ class TradingBot:
                             # target_asset -> asset の場合は一旦JPY経由
                             continue
                         
+                        # LOT_SIZEフィルターを適用
+                        sell_quantity = self._apply_lot_size_filter(sell_symbol, sell_quantity)
+                        
                         # 売却実行
                         logger.info("Executing direct swap: %s -> %s (qty: %s)", 
                                    asset, target_asset, sell_quantity)
@@ -656,11 +659,14 @@ class TradingBot:
                         )
                         
                         if sell_order:
+                            # 購入数量にもLOT_SIZEフィルターを適用
+                            buy_quantity = self._apply_lot_size_filter(buy_symbol, target_quantity)
+                            
                             # すぐにtarget_assetを購入
                             buy_order = self.exchange.create_order(
                                 symbol=buy_symbol,
                                 side="BUY",
-                                quantity=target_quantity
+                                quantity=buy_quantity
                             )
                             
                             if buy_order:
@@ -673,7 +679,8 @@ class TradingBot:
                                             self.positions[display_symbol] = None
                                         break
                                 
-                                logger.info("Direct swap completed: %s -> %s", asset, target_asset)
+                                logger.info("Direct swap completed: %s -> %s (sold: %s, bought: %s)", 
+                                           asset, target_asset, sell_quantity, buy_quantity)
                                 return True
                             else:
                                 logger.warning("Buy order failed in direct swap")

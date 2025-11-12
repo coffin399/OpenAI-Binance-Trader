@@ -132,7 +132,7 @@ class AIHybridStrategy(Strategy):
         # AIに数量を決定させる（aggressive_modeの場合）
         ai_quantity = None
         if self.aggressive_mode and ai_action != "HOLD":
-            ai_quantity = self._calculate_ai_quantity(price, technical_signals, context)
+            ai_quantity = self._calculate_ai_quantity(price, technical_signals, prompt_context)
             info_parts.append(f"Qty: {ai_quantity:.6f}")
         
         return StrategyDecision(

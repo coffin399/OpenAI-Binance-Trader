@@ -69,7 +69,16 @@ class Coffin299Strategy(Strategy):
         # Check if we should use LLM or rely on technical analysis only
         use_llm = self._should_use_llm(symbol)
         
-        if use_llm and not self.technical_only_mode:
+        # Initialize AI decision variables
+        ai_action = None
+        ai_confidence = 0.0
+        ai_reasoning = ""
+        
+        if self.technical_only_mode:
+            # Pure technical analysis mode (no LLM)
+            return self._technical_only_decision(df, symbol, prompt_context)
+        
+        if use_llm:
             # LLM-assisted decision (polled at configured interval)
             try:
                 prompt = self.prompt_template.format(**prompt_context)
@@ -99,20 +108,22 @@ class Coffin299Strategy(Strategy):
                     cached = self._llm_cache[symbol]
                     ai_action = cached["action"]
                     ai_confidence = cached["confidence"] * 0.8  # Reduce confidence for stale cache
-                    ai_reasoning = f"[CACHED] {cached['reasoning']}"
+                    ai_reasoning = f"[CACHED-FALLBACK] {cached['reasoning']}"
                     logger.info("%s: Using cached LLM decision (reduced confidence)", symbol)
                 else:
+                    logger.warning("%s: No LLM cache available, using technical-only", symbol)
                     return self._technical_only_decision(df, symbol, prompt_context)
         else:
-            # Technical-only decision (autonomous operation)
+            # Use cached LLM decision (within polling interval)
             if symbol in self._llm_cache:
                 cached = self._llm_cache[symbol]
                 ai_action = cached["action"]
-                ai_confidence = cached["confidence"] * 0.9  # Slightly reduce confidence
+                ai_confidence = cached["confidence"] * 0.95  # Slightly reduce confidence
                 ai_reasoning = f"[CACHED] {cached['reasoning']}"
                 logger.debug("%s: Using cached LLM guidance", symbol)
             else:
-                # Pure technical analysis
+                # Should not happen (first call should have use_llm=True)
+                logger.warning("%s: No LLM cache but use_llm=False, using technical-only", symbol)
                 return self._technical_only_decision(df, symbol, prompt_context)
         
         if ai_action not in {"BUY", "SELL", "HOLD"}:
@@ -134,14 +145,19 @@ class Coffin299Strategy(Strategy):
         # Apply minimum confidence threshold (relaxed for strong opportunities)
         if is_strong_opportunity:
             effective_threshold *= 0.7  # Lower threshold for strong opportunities
-            logger.debug("%s: Strong opportunity detected, threshold: %.2f", symbol, effective_threshold)
+            logger.info("%s: 🎯 Strong opportunity detected, threshold: %.2f → %.2f", 
+                       symbol, effective_threshold / 0.7, effective_threshold)
         
         if final_confidence < effective_threshold:
             logger.info(
-                "%s: Confidence %.2f below threshold %.2f, skipping trade",
-                symbol, final_confidence, effective_threshold
+                "%s: ⏸️ Confidence %.2f below threshold %.2f, skipping %s (RSI: %.1f, Signal: %+.2f)",
+                symbol, final_confidence, effective_threshold, ai_action,
+                technical_signals.get("rsi", 0), technical_signals.get("combined_signal", 0)
             )
             return None
+        
+        logger.info("%s: ✅ Trade signal: %s (confidence: %.2f > threshold: %.2f)", 
+                   symbol, ai_action, final_confidence, effective_threshold)
 
         # Get current price early for position exit checks
         price = float(df.iloc[-1]["close"])
@@ -629,11 +645,13 @@ class Coffin299Strategy(Strategy):
         Returns:
             Optional[StrategyDecision]: Trading decision or None
         """
-        logger.info("%s: Technical-only mode - autonomous decision", symbol)
-        
         # Calculate technical signals
         technical_signals = self._calculate_technical_signals(df, context)
         price = float(df.iloc[-1]["close"])
+        
+        logger.info("%s: 🤖 Technical-only mode | RSI: %.1f | Signal: %+.2f | Trend: %s | Price: %.4f", 
+                   symbol, technical_signals["rsi"], technical_signals["combined_signal"],
+                   technical_signals["trend"], price)
         
         # Check position exit first (profit taking / stop loss)
         position_action = self._check_position_exit(symbol, price, technical_signals)
@@ -658,44 +676,55 @@ class Coffin299Strategy(Strategy):
         action = "HOLD"
         confidence = 0.5
         
-        # Strong BUY signals
-        if rsi < 30 and combined_signal > 0.4:
+        # Strong BUY signals (relaxed thresholds)
+        if rsi < 35 and combined_signal > 0.3:
             action = "BUY"
             confidence = 0.7
-        elif rsi < 35 and combined_signal > 0.5 and trend == "bullish":
+        elif rsi < 40 and combined_signal > 0.4 and trend == "bullish":
             action = "BUY"
             confidence = 0.75
-        elif combined_signal > 0.6 and momentum_signal > 0.5:
+        elif combined_signal > 0.5 and momentum_signal > 0.3:
             action = "BUY"
             confidence = 0.65
         
-        # Strong SELL signals
-        elif rsi > 70 and combined_signal < -0.4:
+        # Strong SELL signals (relaxed thresholds)
+        elif rsi > 65 and combined_signal < -0.3:
             action = "SELL"
             confidence = 0.7
-        elif rsi > 65 and combined_signal < -0.5 and trend == "bearish":
+        elif rsi > 60 and combined_signal < -0.4 and trend == "bearish":
             action = "SELL"
             confidence = 0.75
-        elif combined_signal < -0.6 and momentum_signal < -0.5:
+        elif combined_signal < -0.5 and momentum_signal < -0.3:
             action = "SELL"
             confidence = 0.65
         
-        # Moderate signals
-        elif rsi < 40 and combined_signal > 0.3:
+        # Moderate signals (more aggressive)
+        elif rsi < 45 and combined_signal > 0.2:
             action = "BUY"
             confidence = 0.55
-        elif rsi > 60 and combined_signal < -0.3:
+        elif rsi > 55 and combined_signal < -0.2:
             action = "SELL"
             confidence = 0.55
+        
+        # Weak but valid signals (aggressive mode)
+        elif rsi < 50 and combined_signal > 0.15:
+            action = "BUY"
+            confidence = 0.45
+        elif rsi > 50 and combined_signal < -0.15:
+            action = "SELL"
+            confidence = 0.45
         
         # Apply minimum confidence threshold
         if confidence < self.min_confidence:
-            logger.debug("%s: Technical confidence %.2f below threshold %.2f", 
-                        symbol, confidence, self.min_confidence)
+            logger.info("%s: ⏸️ Technical confidence %.2f below threshold %.2f (action would be: %s)", 
+                        symbol, confidence, self.min_confidence, action)
             return None
         
         if action == "HOLD":
+            logger.debug("%s: Technical decision: HOLD", symbol)
             return None
+        
+        logger.info("%s: ✅ Technical signal: %s (confidence: %.2f)", symbol, action, confidence)
         
         # Calculate quantity
         ai_quantity = None

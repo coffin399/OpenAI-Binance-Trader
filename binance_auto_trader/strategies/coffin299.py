@@ -104,6 +104,9 @@ class Coffin299Strategy(Strategy):
             )
             return None
 
+        # Get current price early for position exit checks
+        price = float(df.iloc[-1]["close"])
+        
         # Check if technical signals reinforce AI decision (relaxed in aggressive mode)
         if self.use_technical_signals and not self.aggressive_mode:
             signal_agreement = self._check_signal_agreement(ai_action, technical_signals)
@@ -135,8 +138,6 @@ class Coffin299Strategy(Strategy):
                     return None
             else:
                 return None
-
-        price = float(df.iloc[-1]["close"])
         
         # Update position tracking
         if ai_action == "BUY" and self.track_positions:

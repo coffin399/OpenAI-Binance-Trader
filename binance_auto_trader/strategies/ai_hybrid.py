@@ -132,8 +132,13 @@ class AIHybridStrategy(Strategy):
         # AIに数量を決定させる（aggressive_modeの場合）
         ai_quantity = None
         if self.aggressive_mode and ai_action != "HOLD":
+            logger.debug("Calculating AI quantity for %s action %s", symbol, ai_action)
             ai_quantity = self._calculate_ai_quantity(price, technical_signals, prompt_context)
+            logger.info("AI calculated quantity: %s for %s", ai_quantity, symbol)
             info_parts.append(f"Qty: {ai_quantity:.6f}")
+        else:
+            logger.debug("Skipping AI quantity calculation - aggressive_mode: %s, action: %s", 
+                        self.aggressive_mode, ai_action)
         
         return StrategyDecision(
             symbol=symbol,
@@ -481,48 +486,48 @@ class AIHybridStrategy(Strategy):
         return False
     
     def _calculate_ai_quantity(self, price: float, technical_signals: Dict, context: Dict) -> float:
-        """AIが市場状況に基づいて最適な数量を計算.
+        """AIが市場状況に基づいて最適な数量を計算（4000円少額スタート対応）.
         
         Returns:
             float: 計算された数量
         """
-        # 基本数量（シンボルごとに調整）
+        # 基本数量（4000円少額スタート向けに調整）
         symbol = context["symbol"]
         if "BTC" in symbol:
-            base_quantity = 0.001  # BTC: 0.001単位
+            base_quantity = 0.0001  # BTC: 約1000円相当（0.0001 BTC）
         elif "ETH" in symbol:
-            base_quantity = 0.01   # ETH: 0.01単位
+            base_quantity = 0.001   # ETH: 約300円相当（0.001 ETH）
         else:
-            base_quantity = 10.0   # DOGEなど: 10単位
+            base_quantity = 50.0    # DOGEなど: 約50円相当
         
-        # 信頼度に基づく数量調整
+        # 信頼度に基づく数量調整（少額なので控えめに）
         confidence_multiplier = 1.0
         rsi = technical_signals["rsi"]
         volatility = technical_signals["volatility"]
         combined_signal = technical_signals["combined_signal"]
         
-        # RSIが極端な場合、数量を増やす
-        if rsi < 35 or rsi > 65:
-            confidence_multiplier += 0.3
-        
-        # 強いシグナルの場合、数量を増やす
-        if abs(combined_signal) > 0.5:
+        # RSIが極端な場合、数量を少し増やす
+        if rsi < 30 or rsi > 70:
             confidence_multiplier += 0.2
         
-        # ボラティリティが高い場合、数量を少し減らす
+        # 強いシグナルの場合、数量を少し増やす
+        if abs(combined_signal) > 0.6:
+            confidence_multiplier += 0.15
+        
+        # ボラティリティが高い場合、数量を減らす（リスク管理）
         if volatility > 8.0:
-            confidence_multiplier -= 0.1
+            confidence_multiplier -= 0.2
         
         # 最終数量を計算
         final_quantity = base_quantity * confidence_multiplier
         
-        # 最小/最大数量の制限
+        # 最小/最大数量の制限（4000円前提）
         if "BTC" in symbol:
-            final_quantity = max(0.0001, min(final_quantity, 0.01))
+            final_quantity = max(0.00005, min(final_quantity, 0.0005))  # 50円〜500円相当
         elif "ETH" in symbol:
-            final_quantity = max(0.001, min(final_quantity, 0.1))
+            final_quantity = max(0.0005, min(final_quantity, 0.005))   # 15円〜150円相当
         else:
-            final_quantity = max(1.0, min(final_quantity, 100.0))
+            final_quantity = max(10.0, min(final_quantity, 200.0))      # 10円〜200円相当
         
         return round(final_quantity, 6)
     

@@ -106,10 +106,10 @@ web:
   refresh_interval_seconds: 1
 
 runtime:
-  dry_run: false
+  dry_run: true
   polling_interval_seconds: 264
   
 # 初期資金設定（JPYベース）
 initial_capital:
-  jpy_amount: 10000  # 初期JPY残高
+  jpy_amount: 4000  # 初期JPY残高（少額スタート）
   allow_start_from_cash: true  # 現金のみからエントリー開始を許可

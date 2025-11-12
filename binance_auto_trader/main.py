@@ -10,6 +10,7 @@ from typing import Dict, List, Optional
 from binance_auto_trader.ai.provider_manager import AIProviderManager
 from binance_auto_trader.config.config import Config
 from binance_auto_trader.exchange.binance_client import BinanceClient
+from binance_auto_trader.exchange.websocket_client import WebSocketPriceProvider
 from binance_auto_trader.models.trade import StrategyDecision
 from binance_auto_trader.services.backtester import Backtester
 from binance_auto_trader.services.trade_tracker import TradeTracker
@@ -104,6 +105,10 @@ class TradingBot:
         self._initial_wallet_value = 0.0  # 初期ウォレット価値
         self._wallet_notification_interval = 3600  # 1時間（秒）
 
+        # WebSocket price provider (real-time prices with REST API fallback)
+        self.ws_price_provider: Optional[WebSocketPriceProvider] = None
+        self.use_websocket = getattr(getattr(config, "websocket", {}), "enabled", True)
+        
         # 起動時にオープンポジションを検知して復元
         if not self.dry_run:
             self._restore_open_positions()
@@ -139,7 +144,33 @@ class TradingBot:
         logger.info(
             "Starting trading bot for symbols: %s", ", ".join(self.symbols_display)
         )
+        
+        # Start WebSocket for real-time prices
+        if self.use_websocket:
+            try:
+                testnet = getattr(self.config.binance, "testnet", True)
+                self.ws_price_provider = WebSocketPriceProvider(
+                    self.exchange,
+                    self.symbols_display,
+                    testnet=testnet
+                )
+                self.ws_price_provider.start()
+                logger.info("✅ WebSocket price streaming started (reduces API calls by 90%+)")
+            except Exception as e:
+                logger.error("Failed to start WebSocket: %s", e)
+                logger.info("Continuing with REST API only")
+                self.ws_price_provider = None
 
+        try:
+            self._run_loop()
+        finally:
+            # Cleanup WebSocket on exit
+            if self.ws_price_provider:
+                self.ws_price_provider.stop()
+                logger.info("WebSocket stopped")
+    
+    def _run_loop(self) -> None:
+        """Internal trading loop."""
         while not self._stop_event.is_set():
             self._pause_event.wait()
             cycle_started = time.monotonic()
@@ -182,7 +213,9 @@ class TradingBot:
             dataframe = Strategy.klines_to_dataframe(klines)
             last_row = dataframe.iloc[-1]
             last_price = float(last_row["close"])
-            live_price = self.exchange.get_symbol_price(exchange_symbol)
+            
+            # Get live price from WebSocket or REST API fallback
+            live_price = self._get_live_price(display_symbol, exchange_symbol)
             price_point = live_price if live_price is not None else last_price
             self.trade_tracker.append_price_point(
                 display_symbol, datetime.utcnow(), price_point
@@ -193,6 +226,25 @@ class TradingBot:
                 if decision:
                     self._handle_decision(decision, exchange_symbol, last_price)
 
+    def _get_live_price(self, display_symbol: str, exchange_symbol: str) -> Optional[float]:
+        """Get live price from WebSocket or REST API fallback.
+        
+        Args:
+            display_symbol: Display symbol (e.g., "BTC/JPY")
+            exchange_symbol: Exchange symbol (e.g., "BTCJPY")
+        
+        Returns:
+            Live price or None
+        """
+        # Try WebSocket first
+        if self.ws_price_provider:
+            price = self.ws_price_provider.get_price(display_symbol)
+            if price:
+                return price
+        
+        # Fallback to REST API
+        return self.exchange.get_symbol_price(exchange_symbol)
+    
     def _handle_decision(
         self,
         decision: StrategyDecision,

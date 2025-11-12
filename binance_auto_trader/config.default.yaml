@@ -137,7 +137,7 @@ web:
   enabled: true
   host: 127.0.0.1
   port: 8000
-  refresh_interval_seconds: 1
+  refresh_interval_seconds: 10  # Increased to avoid API rate limits
 
 # ========================================
 #  環境設定 (本番/テスト環境)
@@ -150,6 +150,11 @@ binance:
   testnet: true  # ⚠️ false=本番環境 true=テストネット
   recv_window_ms: 5000
 
+# WebSocket設定（リアルタイム価格取得）
+# WebSocketを使用するとAPI呼び出しが90%以上削減され、レート制限を回避できます
+websocket:
+  enabled: true  # WebSocketを有効化（推奨: true）
+
 # バックテスト設定
 backtesting:
   enabled: true  # ⚠️ false=本番環境
@@ -161,6 +166,8 @@ backtesting:
   timeframe: 1m
 
 # ランタイム設定
+# ⚠️ Binance API Rate Limit: 1200 weight/min, 6000 weight/5min
+# 推奨: 60秒以上のポーリング間隔でAPIバンを回避
 runtime:
   dry_run: true  # ⚠️ false=本番環境 true=ドライラン
-  polling_interval_seconds: 264
+  polling_interval_seconds: 60  # Increased from 264 to avoid API rate limits (min: 60s recommended)

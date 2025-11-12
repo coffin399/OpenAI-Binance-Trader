@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from collections import deque
 from datetime import datetime
 from typing import Deque, Dict, Iterable, List, Optional, Sequence
@@ -46,6 +47,11 @@ class TradeTracker:
         self.price_history_limit = 500
         self.symbol_palette: Dict[str, str] = {}
         self._palette_index = 0
+        
+        # Wallet cache to reduce API calls
+        self._wallet_cache: Optional[Dict] = None
+        self._wallet_cache_time: float = 0
+        self._wallet_cache_ttl: float = 30.0  # 30 seconds cache
         
         # dry_run用の仮想ウォレット
         self.virtual_wallet: Dict[str, float] = {}
@@ -305,9 +311,15 @@ class TradeTracker:
         return summary
 
     def _get_wallet_summary(self) -> Dict[str, object]:
-        """ウォレット残高サマリーを取得."""
+        """ウォレット残高サマリーを取得 (キャッシュ付き)."""
         import logging
         logger = logging.getLogger(__name__)
+        
+        # Check cache first
+        current_time = time.time()
+        if self._wallet_cache and (current_time - self._wallet_cache_time) < self._wallet_cache_ttl:
+            logger.debug("Using cached wallet summary (%.1fs old)", current_time - self._wallet_cache_time)
+            return self._wallet_cache
         
         # dry_runモードの場合は仮想ウォレットを使用
         if self.dry_run:
@@ -354,6 +366,11 @@ class TradeTracker:
                         })
                         
                         wallet_summary["total_jpy_value"] += jpy_value
+            
+            # Update cache
+            self._wallet_cache = wallet_summary
+            self._wallet_cache_time = current_time
+            logger.debug("Wallet summary cached (dry_run mode)")
             
             return wallet_summary
         
@@ -403,6 +420,11 @@ class TradeTracker:
                         })
                         
                         wallet_summary["total_jpy_value"] += jpy_value
+                
+                # Update cache
+                self._wallet_cache = wallet_summary
+                self._wallet_cache_time = current_time
+                logger.debug("Wallet summary cached (live mode)")
                 
                 return wallet_summary
             else:

@@ -81,6 +81,9 @@ class TradingBot:
         self.direct_swap = getattr(asset_config, "direct_swap", False)
         self.swap_pairs = getattr(asset_config, "swap_pairs", [])
         self.min_swap_ratio = getattr(asset_config, "min_swap_ratio", 0.1)
+        self.auto_convert_to_jpy = getattr(asset_config, "auto_convert_to_jpy", False)
+        self.jpy_convert_threshold = getattr(asset_config, "jpy_convert_threshold", 0.5)
+        self.max_convert_positions = getattr(asset_config, "max_convert_positions", 2)
         self.polling_interval = int(
             getattr(config.runtime, "polling_interval_seconds", 60)
         )
@@ -666,9 +669,26 @@ class TradingBot:
                         # LOT_SIZEフィルターを適用
                         sell_quantity = self._apply_lot_size_filter(sell_symbol, sell_quantity)
                         
+                        # NOTIONALフィルター対応：最小取引金額チェック
+                        try:
+                            ticker = self.exchange.client.get_symbol_ticker(symbol=sell_symbol)
+                            current_price = float(ticker['price'])
+                            estimated_jpy_value = sell_quantity * current_price
+                            
+                            # Binanceの最小取引金額（約1000JPY相当）
+                            min_notional_jpy = 1000.0
+                            
+                            if estimated_jpy_value < min_notional_jpy:
+                                logger.warning("Direct swap amount too small: %.0f JPY < %.0f JPY (NOTIONAL filter)", 
+                                             estimated_jpy_value, min_notional_jpy)
+                                continue
+                        except Exception as exc:
+                            logger.warning("Could not verify NOTIONAL filter for %s: %s", sell_symbol, exc)
+                            # 続行するが、エラーになる可能性がある
+                        
                         # 売却実行
-                        logger.info("Executing direct swap: %s -> %s (qty: %s)", 
-                                   asset, target_asset, sell_quantity)
+                        logger.info("Executing direct swap: %s -> %s (qty: %s, value: %.0f JPY)", 
+                                   asset, target_asset, sell_quantity, estimated_jpy_value)
                         
                         # まずassetをJPYに売却
                         sell_order = self.exchange.create_order(
@@ -711,6 +731,97 @@ class TradingBot:
         except Exception as exc:
             logger.error("Error executing direct swap: %s", exc)
             return False
+    
+    def _auto_convert_profitable_to_jpy(self) -> None:
+        """利益の出ているポジションを自動でJPYに変換."""
+        if not self.auto_convert_to_jpy or self.dry_run:
+            return
+        
+        try:
+            logger.info("Checking for profitable positions to convert to JPY...")
+            
+            profitable_positions = []
+            current_prices = {}
+            
+            # 現在価格を取得
+            for symbol in self.symbols_display:
+                try:
+                    ticker = self.exchange.client.get_symbol_ticker(symbol=symbol.replace("/", ""))
+                    current_prices[symbol] = float(ticker['price'])
+                except Exception as exc:
+                    logger.warning("Could not get price for %s: %s", symbol, exc)
+                    continue
+            
+            # 利益ポジションを特定
+            for symbol, trade_record in self.trade_tracker.open_trades.items():
+                if symbol not in current_prices:
+                    continue
+                
+                current_price = current_prices[symbol]
+                entry_price = trade_record.entry_price
+                
+                if current_price > 0 and entry_price > 0:
+                    profit_ratio = (current_price - entry_price) / entry_price
+                    
+                    if profit_ratio >= self.jpy_convert_threshold:
+                        profitable_positions.append({
+                            'symbol': symbol,
+                            'trade_record': trade_record,
+                            'profit_ratio': profit_ratio,
+                            'current_price': current_price
+                        })
+            
+            # 利益率の高い順にソート
+            profitable_positions.sort(key=lambda x: x['profit_ratio'], reverse=True)
+            
+            # 最大変換数まで実行
+            converted_count = 0
+            for pos in profitable_positions[:self.max_convert_positions]:
+                symbol = pos['symbol']
+                trade_record = pos['trade_record']
+                current_price = pos['current_price']
+                
+                logger.info("Converting profitable position to JPY: %s (profit: %.1f%%)", 
+                           symbol, pos['profit_ratio'] * 100)
+                
+                # 売却実行
+                sell_quantity = trade_record.quantity
+                sell_quantity = self._apply_lot_size_filter(symbol.replace("/", ""), sell_quantity)
+                
+                order = self.exchange.create_order(
+                    symbol=symbol.replace("/", ""),
+                    side="SELL",
+                    quantity=sell_quantity
+                )
+                
+                if order:
+                    # ポジションをクローズ
+                    self.trade_tracker.record_close_trade(
+                        symbol=symbol,
+                        exit_price=current_price,
+                        close_time=datetime.utcnow()
+                    )
+                    
+                    self.positions[symbol] = None
+                    
+                    # 利益を計算
+                    profit_jpy = sell_quantity * (current_price - trade_record.entry_price)
+                    
+                    logger.info("✅ Converted %s to JPY: profit %.0f JPY (%.1f%%)", 
+                               symbol, profit_jpy, pos['profit_ratio'] * 100)
+                    
+                    converted_count += 1
+                else:
+                    logger.warning("Failed to convert %s to JPY", symbol)
+            
+            if converted_count > 0:
+                logger.info("Auto-conversion completed: %d positions converted to JPY", converted_count)
+            else:
+                logger.info("No profitable positions met conversion threshold (%.1f%%)", 
+                           self.jpy_convert_threshold * 100)
+                
+        except Exception as exc:
+            logger.error("Error in auto JPY conversion: %s", exc)
     
     def _apply_lot_size_filter(self, symbol: str, quantity: float) -> float:
         """BinanceのLOT_SIZEフィルターを適用して数量を調整."""

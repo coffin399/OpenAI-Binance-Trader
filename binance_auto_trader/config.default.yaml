@@ -120,5 +120,8 @@ asset_management:
   max_asset_utilization: 0.8  # 保有資産の最大利用率（80%）
   prefer_profitable_assets: true  # 利益が出ている資産を優先的に売却
   direct_swap: true  # 資産間の直接交換を許可
-  swap_pairs: ["ETH/BTC", "DOGE/ETH", "DOGE/BTC"]  # 許可する交換ペア
+  swap_pairs: ["ETH/BTC"]  # 許可する交換ペア（Binance有効シンボルのみ）
   min_swap_ratio: 0.1  # 最小交換比率（10%）
+  auto_convert_to_jpy: true  # 自動JPY変換機能
+  jpy_convert_threshold: 0.5  # 50%以上利益の場合にJPYへ変換
+  max_convert_positions: 4  # 一度に変換する最大ポジション数

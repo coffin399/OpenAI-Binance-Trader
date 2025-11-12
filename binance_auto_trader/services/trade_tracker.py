@@ -31,10 +31,13 @@ class TradeTracker:
         self.active_strategies = list(active) if isinstance(active, list) else []
 
         symbols_cfg: Sequence[str] = getattr(config.trading, "symbols", []) if hasattr(config, "trading") else []
+        asset_config = getattr(config, "asset_management", {})
+        swap_pairs_cfg: Sequence[str] = getattr(asset_config, "swap_pairs", [])
         if isinstance(symbols_cfg, list):
             self.symbol_order = list(symbols_cfg)
         else:
             self.symbol_order = [symbols_cfg] if symbols_cfg else []
+        self.swap_pairs = list(swap_pairs_cfg) if swap_pairs_cfg else []
 
         self.open_trades: Dict[str, TradeRecord] = {}
         self.closed_trades: List[TradeRecord] = []
@@ -210,6 +213,7 @@ class TradeTracker:
             "open_trades": open_trades,
             "recent_closed_trades": recent_closed,
             "symbols": self._build_symbol_summaries(),
+            "swap_pairs": self.swap_pairs,
         })
         return summary
 

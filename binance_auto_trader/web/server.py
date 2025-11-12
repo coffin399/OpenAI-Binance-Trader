@@ -230,6 +230,11 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
 
       <section class=\"symbol-strip\" id=\"symbol-strip\"></section>
 
+      <section class=\"card\" style=\"margin-bottom: 32px;\" id=\"swap-pairs-section\">
+        <div class=\"section-title\">Direct Swap Pairs</div>
+        <div id=\"swap-pairs-list\"></div>
+      </section>
+
       <section class=\"grid\">
         <div class=\"card\">
           <h2>Total Trades</h2>
@@ -359,6 +364,37 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
             options: chartOptions,
           });
         }
+      }
+
+      function renderSwapPairs(swapPairs) {
+        const container = document.getElementById('swap-pairs-list');
+        const section = document.getElementById('swap-pairs-section');
+        if (!container || !section) return;
+        
+        container.innerHTML = '';
+        
+        if (!swapPairs || !swapPairs.length) {
+          section.style.display = 'none';
+          return;
+        }
+        
+        section.style.display = 'block';
+        
+        const swapContainer = document.createElement('div');
+        swapContainer.style.display = 'flex';
+        swapContainer.style.gap = '12px';
+        swapContainer.style.flexWrap = 'wrap';
+        
+        swapPairs.forEach((pair) => {
+          const pill = document.createElement('div');
+          pill.className = 'pill';
+          pill.style.background = 'rgba(59,130,246,0.15)';
+          pill.style.border = '1px solid rgba(59,130,246,0.3)';
+          pill.innerHTML = `<span style="width:8px;height:8px;background:#3b82f6;border-radius:50%;display:inline-block;margin-right:6px;"></span>${pair}`;
+          swapContainer.appendChild(pill);
+        });
+        
+        container.appendChild(swapContainer);
       }
 
       function renderSymbolStrip(symbols) {
@@ -508,6 +544,7 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
           const backtest = await btRes.json();
 
           renderSymbolStrip(summary.symbols || []);
+          renderSwapPairs(summary.swap_pairs || []);
 
           const modeEl = document.getElementById('mode-pill');
           modeEl.textContent = summary.mode;

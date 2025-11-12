@@ -1,21 +1,6 @@
-binance:
-  api_key: ""
-  api_secret: ""
-  testnet: true
-  recv_window_ms: 5000
+# Binance Auto Trader Configuration
 
-discord:
-  enabled: false
-  bot_token: ""
-  channel_ids: []
-  rate_limit:
-    max_messages: 15
-    per_seconds: 5
-  ansi_wrap: true
-  commands_enabled: true
-  command_guild_ids: []
-  allowed_user_ids: []
-
+# トレードシンボル設定
 trading:
   symbols:
     - BTC/JPY
@@ -29,6 +14,7 @@ trading:
   # 0Trades で無制限
   # 0JPY で無制限
 
+# 戦略設定
 strategies:
   active:
     - ai_hybrid
@@ -72,6 +58,7 @@ strategies:
       Reply with: BUY, SELL, or HOLD
       Preferred: JSON {"action": "BUY/SELL/HOLD", "confidence": 0.0-1.0, "reasoning": "brief explanation"}
 
+# AIプロバイダー設定
 ai:
   providers:
     - name: openrouter
@@ -81,34 +68,11 @@ ai:
       api_keys:
         - ""
 
-backtesting:
-  enabled: false
-  lookback_intervals: 200
-  symbols:
-    - BTC/JPY
-    - ETH/JPY
-    - DOGE/JPY
-  timeframe: 1m
-
+# リスク管理設定
 risk_management:
   stop_loss_percent: 2.0
   take_profit_percent: 4.0
 
-logging:
-  level: DEBUG
-  file: trading_bot.log
-  console: true
-
-web:
-  enabled: true
-  host: 127.0.0.1
-  port: 8000
-  refresh_interval_seconds: 1
-
-runtime:
-  dry_run: true
-  polling_interval_seconds: 264
-  
 # 初期資金設定（JPYベース）
 initial_capital:
   jpy_amount: 4000  # 初期JPY残高（少額スタート）
@@ -125,3 +89,55 @@ asset_management:
   auto_convert_to_jpy: true  # 自動JPY変換機能
   jpy_convert_threshold: 0.5  # 50%以上利益の場合にJPYへ変換
   max_convert_positions: 4  # 一度に変換する最大ポジション数
+
+# Discord通知設定
+discord:
+  enabled: false
+  bot_token: ""
+  channel_ids: []
+  rate_limit:
+    max_messages: 15
+    per_seconds: 5
+  ansi_wrap: true
+  commands_enabled: true
+  command_guild_ids: []
+  allowed_user_ids: []
+
+# ログ設定
+logging:
+  level: DEBUG
+  file: trading_bot.log
+  console: true
+
+# Webダッシュボード設定
+web:
+  enabled: true
+  host: 127.0.0.1
+  port: 8000
+  refresh_interval_seconds: 1
+
+# ========================================
+#  環境設定 (本番/テスト環境)
+# ========================================
+
+# Binance API設定
+binance:
+  api_key: ""
+  api_secret: ""
+  testnet: true  # ⚠️ false=本番環境 true=テストネット
+  recv_window_ms: 5000
+
+# バックテスト設定
+backtesting:
+  enabled: true  # ⚠️ false=本番環境
+  lookback_intervals: 200
+  symbols:
+    - BTC/JPY
+    - ETH/JPY
+    - DOGE/JPY
+  timeframe: 1m
+
+# ランタイム設定
+runtime:
+  dry_run: true  # ⚠️ false=本番環境 true=ドライラン
+  polling_interval_seconds: 264

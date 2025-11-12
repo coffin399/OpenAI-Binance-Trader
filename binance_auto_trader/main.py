@@ -511,7 +511,11 @@ class TradingBot:
                         # 残高範囲内で数量を調整
                         affordable_quantity = (jpy_balance * 0.95) / last_price  # 5%余裕を持たせる
                         filtered_quantity = self._apply_lot_size_filter(symbol, affordable_quantity)
-                        logger.info("⚠️  ADJUSTED FOR BALANCE: %s", filtered_quantity)
+                        logger.info("⚠️  ADJUSTED FOR BALANCE: %s (affordable: %.2f)", filtered_quantity, affordable_quantity)
+                        
+                        # 調整後の必要JPYを再計算
+                        required_jpy_adjusted = filtered_quantity * last_price
+                        logger.info("Required JPY after adjustment: %.0f (balance: %.0f)", required_jpy_adjusted, jpy_balance)
                 
                 return filtered_quantity
         
@@ -1001,8 +1005,8 @@ class TradingBot:
                     elif adjusted_quantity > max_qty:
                         adjusted_quantity = max_qty
 
-                    logger.debug(
-                        "Applied LOT_SIZE filter for %s: %s -> %s (min: %s, max: %s, step: %s)",
+                    logger.info(
+                        "✅ Applied LOT_SIZE filter for %s: %.6f -> %.6f (min: %s, max: %s, step: %s)",
                         symbol,
                         quantity,
                         adjusted_quantity,
@@ -1011,6 +1015,10 @@ class TradingBot:
                         step_size,
                     )
                     return round(adjusted_quantity, 8)
+                else:
+                    logger.warning("LOT_SIZE filter not found for %s", symbol)
+            else:
+                logger.warning("Symbol info not found for %s", symbol)
 
             logger.warning("Could not get LOT_SIZE filter for %s, using rounded quantity", symbol)
             return round(quantity, 8)
@@ -1022,13 +1030,30 @@ class TradingBot:
     def _get_symbol_info(self, exchange_symbol: str) -> Optional[Dict[str, object]]:
         """Binanceのシンボル情報をキャッシュ付きで取得."""
         if exchange_symbol in self._symbol_info_cache:
+            logger.debug("Using cached symbol info for %s", exchange_symbol)
             return self._symbol_info_cache[exchange_symbol]
 
         try:
+            logger.info("Fetching exchange info for %s...", exchange_symbol)
             exchange_info = self.exchange.client.get_exchange_info()
+            symbols_count = 0
             for info in exchange_info.get("symbols", []):
                 self._symbol_info_cache[info["symbol"]] = info
-            return self._symbol_info_cache.get(exchange_symbol)
+                symbols_count += 1
+            
+            logger.info("Cached %d symbols from exchange info", symbols_count)
+            
+            if exchange_symbol in self._symbol_info_cache:
+                logger.info("✅ Found symbol info for %s", exchange_symbol)
+                return self._symbol_info_cache[exchange_symbol]
+            else:
+                logger.warning("❌ Symbol %s not found in exchange info (available: %d symbols)", 
+                             exchange_symbol, symbols_count)
+                # デバッグ: 類似シンボルを検索
+                similar = [s for s in self._symbol_info_cache.keys() if "DOGE" in s]
+                if similar:
+                    logger.info("Similar symbols found: %s", similar[:10])
+                return None
         except Exception as exc:
             logger.warning("Could not fetch exchange info for %s: %s", exchange_symbol, exc)
             return None

@@ -507,7 +507,7 @@ class TradingBot:
             # 実際の保有量を取得
             try:
                 base_asset = display_symbol.split('/')[0]
-                balance = self.exchange.get_balance(base_asset)
+                balance = self.exchange.get_account_balance(base_asset)
                 if balance and balance > 0:
                     actual_quantity = self._apply_lot_size_filter(display_symbol, balance)
                     actual_notional = actual_quantity * price

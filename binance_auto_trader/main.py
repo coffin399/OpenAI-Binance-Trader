@@ -78,6 +78,9 @@ class TradingBot:
         self.use_held_assets = getattr(asset_config, "use_held_assets", False)
         self.max_asset_utilization = getattr(asset_config, "max_asset_utilization", 0.8)
         self.prefer_profitable_assets = getattr(asset_config, "prefer_profitable_assets", True)
+        self.direct_swap = getattr(asset_config, "direct_swap", False)
+        self.swap_pairs = getattr(asset_config, "swap_pairs", [])
+        self.min_swap_ratio = getattr(asset_config, "min_swap_ratio", 0.1)
         self.polling_interval = int(
             getattr(config.runtime, "polling_interval_seconds", 60)
         )
@@ -230,6 +233,12 @@ class TradingBot:
             if jpy_balance < 500:  # 最低500JPY必要（少額スタート対応）
                 # 保有資産を活用する場合
                 if self.use_held_assets:
+                    # 資産間直接交換を試みる
+                    if self.direct_swap and self._can_direct_swap(exchange_symbol):
+                        logger.info("Direct swap available for %s", display_symbol)
+                        return True
+                    
+                    # 従来通りJPYに変換する方法
                     available_jpy = self._get_available_jpy_from_assets()
                     total_available = jpy_balance + available_jpy
                     if total_available >= 500:
@@ -301,7 +310,31 @@ class TradingBot:
                 )
                 return
 
-        order = self._submit_order(exchange_symbol, side, quantity)
+        # 直接交換を試みる
+        order = None
+        if self.direct_swap and side == "BUY":
+            jpy_balance = self._get_jpy_balance()
+            if jpy_balance and jpy_balance < 500:  # JPY不足時のみ直接交換
+                logger.info("Attempting direct swap for %s (JPY balance: %.0f)", display_symbol, jpy_balance)
+                if self._execute_direct_swap(exchange_symbol, quantity):
+                    # 直接交換成功の場合、ポジションを記録
+                    self.positions[display_symbol] = position_label
+                    self.trade_tracker.record_open_trade(
+                        symbol=display_symbol,
+                        side=side,
+                        quantity=quantity,
+                        price=price,
+                        strategy=decision.strategy_name,
+                        confidence=decision.confidence,
+                        reasoning=decision.reasoning,
+                    )
+                    logger.info("Position opened via direct swap: %s %s at %.4f", side, display_symbol, price)
+                    return
+        
+        # 通常のオーダー実行
+        if not order:
+            order = self._submit_order(exchange_symbol, side, quantity)
+        
         if order:
             self.positions[display_symbol] = position_label
             self.trade_tracker.record_open_trade(
@@ -551,6 +584,106 @@ class TradingBot:
             
         except Exception as exc:
             logger.error("Error selling assets for JPY: %s", exc)
+            return False
+    
+    def _can_direct_swap(self, target_symbol: str) -> bool:
+        """指定されたシンボルに直接交換できるか判定."""
+        try:
+            # ターゲットの資産名を取得
+            target_asset = target_symbol.replace("JPY", "")
+            
+            # 保有資産を取得
+            account = self.exchange.client.get_account()
+            
+            for balance in account['balances']:
+                asset = balance['asset']
+                free_qty = float(balance['free'])
+                
+                if asset != 'JPY' and free_qty > 0:
+                    # 交換ペアをチェック
+                    swap_pair = f"{asset}/{target_asset}"
+                    reverse_pair = f"{target_asset}/{asset}"
+                    
+                    if swap_pair in self.swap_pairs or reverse_pair in self.swap_pairs:
+                        logger.info("Found direct swap pair: %s (asset: %s, qty: %s)", 
+                                   swap_pair, asset, free_qty)
+                        return True
+            
+            return False
+            
+        except Exception as exc:
+            logger.error("Error checking direct swap availability: %s", exc)
+            return False
+    
+    def _execute_direct_swap(self, target_symbol: str, target_quantity: float) -> bool:
+        """資産間直接交換を実行."""
+        try:
+            # ターゲットの資産名を取得
+            target_asset = target_symbol.replace("JPY", "")
+            
+            # 保有資産を取得
+            account = self.exchange.client.get_account()
+            
+            for balance in account['balances']:
+                asset = balance['asset']
+                free_qty = float(balance['free'])
+                
+                if asset != 'JPY' and free_qty > 0:
+                    # 交換ペアをチェック
+                    swap_pair = f"{asset}/{target_asset}"
+                    reverse_pair = f"{target_asset}/{asset}"
+                    
+                    if swap_pair in self.swap_pairs or reverse_pair in self.swap_pairs:
+                        # 交換する数量を計算
+                        if swap_pair in self.swap_pairs:
+                            # asset -> target_asset の直接売却
+                            sell_symbol = f"{asset}JPY"
+                            buy_symbol = target_symbol
+                            sell_quantity = free_qty * self.max_asset_utilization
+                        else:
+                            # target_asset -> asset の場合は一旦JPY経由
+                            continue
+                        
+                        # 売却実行
+                        logger.info("Executing direct swap: %s -> %s (qty: %s)", 
+                                   asset, target_asset, sell_quantity)
+                        
+                        # まずassetをJPYに売却
+                        sell_order = self.exchange.create_order(
+                            symbol=sell_symbol,
+                            side="SELL",
+                            quantity=sell_quantity
+                        )
+                        
+                        if sell_order:
+                            # すぐにtarget_assetを購入
+                            buy_order = self.exchange.create_order(
+                                symbol=buy_symbol,
+                                side="BUY",
+                                quantity=target_quantity
+                            )
+                            
+                            if buy_order:
+                                # trade_trackerを更新
+                                # 旧ポジションを削除
+                                for display_symbol in self.symbols_display:
+                                    if asset in display_symbol:
+                                        if display_symbol in self.trade_tracker.open_trades:
+                                            del self.trade_tracker.open_trades[display_symbol]
+                                            self.positions[display_symbol] = None
+                                        break
+                                
+                                logger.info("Direct swap completed: %s -> %s", asset, target_asset)
+                                return True
+                            else:
+                                logger.warning("Buy order failed in direct swap")
+                        else:
+                            logger.warning("Sell order failed in direct swap")
+            
+            return False
+            
+        except Exception as exc:
+            logger.error("Error executing direct swap: %s", exc)
             return False
     
     def _apply_lot_size_filter(self, symbol: str, quantity: float) -> float:

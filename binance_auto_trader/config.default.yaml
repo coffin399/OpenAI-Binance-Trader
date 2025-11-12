@@ -119,3 +119,6 @@ asset_management:
   use_held_assets: true  # 保有資産を売却して新規ポジションを開く
   max_asset_utilization: 0.8  # 保有資産の最大利用率（80%）
   prefer_profitable_assets: true  # 利益が出ている資産を優先的に売却
+  direct_swap: true  # 資産間の直接交換を許可
+  swap_pairs: ["ETH/BTC", "DOGE/ETH", "DOGE/BTC"]  # 許可する交換ペア
+  min_swap_ratio: 0.1  # 最小交換比率（10%）

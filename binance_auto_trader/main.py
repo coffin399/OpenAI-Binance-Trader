@@ -316,19 +316,27 @@ class TradingBot:
             jpy_balance = self._get_jpy_balance()
             if jpy_balance and jpy_balance < 500:  # JPY不足時のみ直接交換
                 logger.info("Attempting direct swap for %s (JPY balance: %.0f)", display_symbol, jpy_balance)
-                if self._execute_direct_swap(exchange_symbol, quantity):
+                actual_quantity = self._execute_direct_swap(exchange_symbol, quantity)
+                if actual_quantity:
                     # 直接交換成功の場合、ポジションを記録
                     self.positions[display_symbol] = position_label
+                    
+                    # 正しい戦略情報を取得
+                    strategy_name = getattr(decision, 'strategy_name', 'ai_hybrid')
+                    confidence = getattr(decision, 'confidence', 0.5)
+                    reasoning = getattr(decision, 'reasoning', 'Direct swap executed')
+                    
                     self.trade_tracker.record_open_trade(
                         symbol=display_symbol,
                         side=side,
-                        quantity=quantity,
+                        quantity=actual_quantity,  # 実際の購入数量を使用
                         price=price,
-                        strategy=decision.strategy_name,
-                        confidence=decision.confidence,
-                        reasoning=decision.reasoning,
+                        strategy=strategy_name,
+                        confidence=confidence,
+                        reasoning=reasoning,
                     )
-                    logger.info("Position opened via direct swap: %s %s at %.4f", side, display_symbol, price)
+                    logger.info("Position opened via direct swap: %s %s at %.4f (qty: %s, strategy: %s)", 
+                               side, display_symbol, price, actual_quantity, strategy_name)
                     return
         
         # 通常のオーダー実行
@@ -615,8 +623,8 @@ class TradingBot:
             logger.error("Error checking direct swap availability: %s", exc)
             return False
     
-    def _execute_direct_swap(self, target_symbol: str, target_quantity: float) -> bool:
-        """資産間直接交換を実行."""
+    def _execute_direct_swap(self, target_symbol: str, target_quantity: float) -> Optional[float]:
+        """資産間直接交換を実行. 成功した場合は実際の購入数量を返す."""
         try:
             # ターゲットの資産名を取得
             target_asset = target_symbol.replace("JPY", "")
@@ -681,7 +689,7 @@ class TradingBot:
                                 
                                 logger.info("Direct swap completed: %s -> %s (sold: %s, bought: %s)", 
                                            asset, target_asset, sell_quantity, buy_quantity)
-                                return True
+                                return buy_quantity  # 実際の購入数量を返す
                             else:
                                 logger.warning("Buy order failed in direct swap")
                         else:

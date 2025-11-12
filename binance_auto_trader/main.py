@@ -326,15 +326,26 @@ class TradingBot:
                     confidence = getattr(decision, 'confidence', 0.5)
                     reasoning = getattr(decision, 'reasoning', 'Direct swap executed')
                     
+                    # デバッグ情報
+                    logger.info("Recording direct swap position: symbol=%s, strategy=%s, action=%s, qty=%s, price=%s", 
+                               display_symbol, strategy_name, side, actual_quantity, price)
+                    
                     self.trade_tracker.record_open_trade(
                         symbol=display_symbol,
-                        side=side,
+                        strategy=strategy_name,
+                        action=side,
                         quantity=actual_quantity,  # 実際の購入数量を使用
                         price=price,
-                        strategy=strategy_name,
-                        confidence=confidence,
-                        reasoning=reasoning,
                     )
+                    
+                    # 確認ログ
+                    if display_symbol in self.trade_tracker.open_trades:
+                        record = self.trade_tracker.open_trades[display_symbol]
+                        logger.info("✅ Position recorded in tracker: %s qty=%s price=%s", 
+                                   record.symbol, record.quantity, record.entry_price)
+                    else:
+                        logger.warning("❌ Position NOT found in tracker after recording")
+                    
                     logger.info("Position opened via direct swap: %s %s at %.4f (qty: %s, strategy: %s)", 
                                side, display_symbol, price, actual_quantity, strategy_name)
                     return

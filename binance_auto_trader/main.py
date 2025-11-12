@@ -82,6 +82,10 @@ class TradingBot:
 
         self.positions: Dict[str, Optional[str]] = {symbol: None for symbol in self.symbols_display}
 
+        # 起動時にオープンポジションを検知して復元
+        if not self.dry_run:
+            self._restore_open_positions()
+
         if self.dry_run:
             logger.info("Running in dry-run mode. No live orders will be sent.")
 
@@ -451,6 +455,66 @@ class TradingBot:
         except Exception as exc:
             logger.warning("Error applying LOT_SIZE filter for %s: %s", symbol, exc)
             return round(quantity, 8)
+    
+    def _restore_open_positions(self) -> None:
+        """Binanceからオープンポジションを検知してtrade_trackerに復元."""
+        try:
+            logger.info("Restoring open positions from exchange...")
+            
+            # スポットの資産状況を取得
+            account = self.exchange.client.get_account()
+            restored_count = 0
+            
+            for balance in account['balances']:
+                asset = balance['asset']
+                free_qty = float(balance['free'])
+                
+                # JPY以外で保有量が0より大きい場合、オープンポジションとみなす
+                if asset != 'JPY' and free_qty > 0:
+                    # 対応するシンボルを検索
+                    symbol = None
+                    for display_symbol in self.symbols_display:
+                        if asset in display_symbol:
+                            symbol = display_symbol
+                            break
+                    
+                    if symbol:
+                        # 現在価格を取得
+                        try:
+                            ticker = self.exchange.client.get_symbol_ticker(symbol=symbol.replace("/", ""))
+                            current_price = float(ticker['price'])
+                            
+                            # trade_trackerにポジションを復元
+                            from binance_auto_trader.models.trade import TradeRecord
+                            from datetime import datetime
+                            
+                            trade_record = TradeRecord(
+                                symbol=symbol,
+                                strategy="restored",  # 復元されたポジション
+                                action="BUY",  # スポットはBUYのみ
+                                quantity=free_qty,
+                                entry_price=current_price,  # 現在価格で仮設定
+                                exit_price=None,
+                                pnl_percent=None,
+                                status="OPEN",
+                                entry_time=datetime.utcnow(),
+                                exit_time=None
+                            )
+                            
+                            self.trade_tracker.open_trades[symbol] = trade_record
+                            self.positions[symbol] = "LONG"
+                            restored_count += 1
+                            
+                            logger.info("Restored position: %s qty=%s price=%s", 
+                                       symbol, free_qty, current_price)
+                            
+                        except Exception as exc:
+                            logger.warning("Could not get price for restored position %s: %s", symbol, exc)
+            
+            logger.info("Position restoration completed. Restored %d positions.", restored_count)
+            
+        except Exception as exc:
+            logger.error("Error restoring open positions: %s", exc)
 
     # ------------------------------------------------------------------
     # External control (Discord commands / orchestration)

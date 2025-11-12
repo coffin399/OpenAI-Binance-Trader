@@ -76,7 +76,7 @@ ai:
   providers:
     - name: openrouter
       base_url: https://openrouter.ai/api/v1
-      model: deepseek/deepseek-chat-v3.1:free
+      model: "deepseek/deepseek-chat-v3.1:free"
       temperature: 0.6
       api_keys:
         - ""

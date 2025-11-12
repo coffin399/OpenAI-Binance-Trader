@@ -353,11 +353,11 @@ class AIHybridStrategy(Strategy):
             elif trend == "bullish":
                 confidence -= 0.1
         
-        # Volatility adjustment (higher volatility = lower confidence)
-        if volatility > 5.0:
-            confidence -= 0.1
-        elif volatility > 3.0:
-            confidence -= 0.05
+        # Volatility adjustment (higher volatility = lower confidence) - Reduced penalties
+        if volatility > 8.0:
+            confidence -= 0.08
+        elif volatility > 5.0:
+            confidence -= 0.04
         
         # Ensure confidence is in valid range
         return max(0.0, min(1.0, confidence))

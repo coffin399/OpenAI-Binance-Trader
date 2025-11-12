@@ -671,12 +671,24 @@ class TradingBot:
                         
                         # NOTIONALフィルター対応：最小取引金額チェック
                         try:
-                            ticker = self.exchange.client.get_symbol_ticker(symbol=sell_symbol)
-                            current_price = float(ticker['price'])
-                            estimated_jpy_value = sell_quantity * current_price
+                            if "BTC" in sell_symbol:
+                                # BTCペアはUSDT建てで価格取得
+                                usdt_symbol = sell_symbol.replace("JPY", "USDT")
+                                ticker = self.exchange.client.get_symbol_ticker(symbol=usdt_symbol)
+                                usdt_price = float(ticker['price'])
+                                # USDTをJPYに変換（仮に1USDT=150JPY）
+                                estimated_jpy_value = sell_quantity * usdt_price * 150
+                            else:
+                                # JPYペアは直接JPY価格
+                                ticker = self.exchange.client.get_symbol_ticker(symbol=sell_symbol)
+                                current_price = float(ticker['price'])
+                                estimated_jpy_value = sell_quantity * current_price
                             
-                            # Binanceの最小取引金額（約1000JPY相当）
-                            min_notional_jpy = 1000.0
+                            # Binanceの最小取引金額（ETH/BTCは約5USDT≈750JPY相当）
+                            if "BTC" in sell_symbol:
+                                min_notional_jpy = 750.0  # BTCペアは低め
+                            else:
+                                min_notional_jpy = 1000.0  # その他は1000JPY
                             
                             if estimated_jpy_value < min_notional_jpy:
                                 logger.warning("Direct swap amount too small: %.0f JPY < %.0f JPY (NOTIONAL filter)", 
